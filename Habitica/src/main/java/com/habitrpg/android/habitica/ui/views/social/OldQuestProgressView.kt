@@ -8,16 +8,16 @@ import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import butterknife.ButterKnife
 import com.facebook.drawee.view.SimpleDraweeView
 import com.habitrpg.android.habitica.R
-import com.habitrpg.android.habitica.extensions.bindView
+import com.habitrpg.android.habitica.extensions.inflate
+import com.habitrpg.android.habitica.ui.helpers.bindView
 import com.habitrpg.android.habitica.extensions.setScaledPadding
 import com.habitrpg.android.habitica.models.inventory.QuestContent
 import com.habitrpg.android.habitica.models.inventory.QuestProgress
+import com.habitrpg.android.habitica.models.inventory.QuestProgressCollect
 import com.habitrpg.android.habitica.models.user.User
 import com.habitrpg.android.habitica.ui.helpers.DataBindingUtils
 import com.habitrpg.android.habitica.ui.views.HabiticaIcons
@@ -28,6 +28,7 @@ class OldQuestProgressView : LinearLayout {
 
     private val bossNameView: TextView by bindView(R.id.bossNameView)
     private val bossHealthView: ValueBar by bindView(R.id.bossHealthView)
+    private val bossRageView: ValueBar by bindView(R.id.bossRageView)
     private val collectionContainer: ViewGroup by bindView(R.id.collectionContainer)
 
     private val rect = RectF()
@@ -46,8 +47,7 @@ class OldQuestProgressView : LinearLayout {
 
     private fun setupView(context: Context) {
         setWillNotDraw(false)
-        val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        inflater.inflate(R.layout.quest_progress_old, this)
+        inflate(R.layout.quest_progress_old, true)
 
         orientation = LinearLayout.VERTICAL
 
@@ -55,6 +55,7 @@ class OldQuestProgressView : LinearLayout {
 
         bossHealthView.setSecondaryIcon(HabiticaIconsHelper.imageOfHeartLightBg())
         bossHealthView.setDescriptionIcon(HabiticaIconsHelper.imageOfDamage())
+        bossRageView.setSecondaryIcon(HabiticaIconsHelper.imageOfRage())
     }
 
     override fun onDraw(canvas: Canvas?) {
@@ -70,31 +71,36 @@ class OldQuestProgressView : LinearLayout {
     fun setData(quest: QuestContent, progress: QuestProgress?) {
         collectionContainer.removeAllViews()
         if (quest.isBossQuest) {
-            bossNameView.text = quest.boss.name
+            bossNameView.text = quest.boss?.name
             if (progress != null) {
-                bossHealthView.set(progress.hp, quest.boss.hp.toDouble())
+                bossHealthView.set(progress.hp, quest.boss?.hp?.toDouble() ?: 0.0)
+            }
+            if (quest.boss?.hasRage() == true) {
+                bossRageView.visibility = View.VISIBLE
+                bossRageView.set(progress?.rage ?: 0.0, quest.boss?.rage?.value ?: 0.0)
+            } else {
+                bossRageView.visibility = View.GONE
             }
             bossNameView.visibility = View.VISIBLE
             bossHealthView.visibility = View.VISIBLE
         } else {
             bossNameView.visibility = View.GONE
             bossHealthView.visibility = View.GONE
+            bossRageView.visibility = View.GONE
 
             if (progress != null) {
                 val inflater = LayoutInflater.from(context)
-                if (progress.collect != null) {
-                    for (collect in progress.collect!!) {
-                        val contentCollect = quest.getCollectWithKey(collect.key) ?: continue
-                        val view = inflater.inflate(R.layout.quest_collect, collectionContainer, false)
-                        val iconView = view.findViewById<View>(R.id.icon_view) as SimpleDraweeView
-                        val nameView = view.findViewById<View>(R.id.name_view) as TextView
-                        val valueView = view.findViewById<View>(R.id.value_view) as ValueBar
-                        DataBindingUtils.loadImage(iconView, "quest_" + quest.key + "_" + collect.key)
-                        nameView.text = contentCollect.text
-                        valueView.set(collect.count.toDouble(), contentCollect.count.toDouble())
+                for (collect in progress.collect ?: emptyList<QuestProgressCollect>()) {
+                    val contentCollect = quest.getCollectWithKey(collect.key) ?: continue
+                    val view = inflater.inflate(R.layout.quest_collect, collectionContainer, false)
+                    val iconView = view.findViewById(R.id.icon_view) as? SimpleDraweeView
+                    val nameView = view.findViewById(R.id.name_view) as? TextView
+                    val valueView = view.findViewById(R.id.value_view) as? ValueBar
+                    DataBindingUtils.loadImage(iconView, "quest_" + quest.key + "_" + collect.key)
+                    nameView?.text = contentCollect.text
+                    valueView?.set(collect.count.toDouble(), contentCollect.count.toDouble())
 
-                        collectionContainer.addView(view)
-                    }
+                    collectionContainer.addView(view)
                 }
             }
         }

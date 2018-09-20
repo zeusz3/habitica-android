@@ -5,26 +5,21 @@ import android.support.v7.widget.RecyclerView
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-
 import com.habitrpg.android.habitica.HabiticaBaseApplication
 import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.data.TaskRepository
+import com.habitrpg.android.habitica.extensions.notNull
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.helpers.TaskFilterHelper
 import com.habitrpg.android.habitica.models.tasks.Task
 import com.habitrpg.android.habitica.proxy.CrashlyticsProxy
 import com.habitrpg.android.habitica.ui.viewHolders.tasks.BaseTaskViewHolder
-import io.realm.RealmResults
-
-import java.util.ArrayList
-
+import io.reactivex.Flowable
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.functions.Consumer
+import io.reactivex.schedulers.Schedulers
+import java.util.*
 import javax.inject.Inject
-
-import rx.Observable
-import rx.android.schedulers.AndroidSchedulers
-import rx.functions.Action1
-import rx.functions.Func1
-import rx.schedulers.Schedulers
 
 abstract class BaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(var taskType: String, private val taskFilterHelper: TaskFilterHelper?, private val layoutResource: Int,
                                                                      newContext: Context, private val userID: String?) : RecyclerView.Adapter<VH>() {
@@ -40,7 +35,7 @@ abstract class BaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(var taskTyp
         this.setHasStableIds(true)
         this.context = newContext.applicationContext
         this.filteredContent = ArrayList()
-        injectThis(HabiticaBaseApplication.getComponent())
+        HabiticaBaseApplication.component.notNull { injectThis(it) }
 
         if (loadFromDatabase()) {
             this.loadContent(true)
@@ -50,10 +45,10 @@ abstract class BaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(var taskTyp
     protected abstract fun injectThis(component: AppComponent)
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val item = filteredContent!![position]
-
-        holder.bindHolder(item, position)
-
+        val item = filteredContent?.get(position)
+        if (item != null) {
+            holder.bindHolder(item, position)
+        }
         /*if (this.displayedChecklist != null && ChecklistedViewHolder.class.isAssignableFrom(holder.getClass())) {
             ChecklistedViewHolder checklistedHolder = (ChecklistedViewHolder) holder;
             checklistedHolder.setDisplayChecklist(this.displayedChecklist == position);
@@ -61,29 +56,29 @@ abstract class BaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(var taskTyp
     }
 
     override fun getItemId(position: Int): Long {
-        val task = filteredContent!![position]
-        return task.id!!.hashCode().toLong()
+        val task = filteredContent?.get(position)
+        return task?.id?.hashCode()?.toLong() ?: 0
     }
 
-    override fun getItemCount(): Int = if (filteredContent != null) filteredContent!!.size else 0
+    override fun getItemCount(): Int =filteredContent?.size ?: 0
 
     internal fun getContentView(parent: ViewGroup): View = getContentView(parent, layoutResource)
 
     protected fun getContentView(parent: ViewGroup, layoutResource: Int): View =
             LayoutInflater.from(parent.context).inflate(layoutResource, parent, false)
 
-    fun updateTask(task: Task) {
+    private fun updateTask(task: Task) {
         if (taskType != task.type)
             return
-        var i: Int = 0
-        while (i < this.content!!.size) {
-            if (content!![i].id == task.id) {
+        var i = 0
+        while (i < this.content?.size ?: 0) {
+            if (content?.get(i)?.id == task.id) {
                 break
             }
             ++i
         }
-        if (i < content!!.size) {
-            content!![i] = task
+        if (i < content?.size ?: 0) {
+            content?.set(i, task)
         }
         filter()
     }
@@ -93,16 +88,18 @@ abstract class BaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(var taskTyp
             filteredContent = content
         } else {
             filteredContent = ArrayList()
-            filteredContent!!.addAll(this.taskFilterHelper.filter(content))
+            content.notNull {
+                filteredContent?.addAll(this.taskFilterHelper.filter(it))
+            }
         }
 
         this.notifyDataSetChanged()
     }
 
-    fun loadContent(forced: Boolean) {
+    private fun loadContent(forced: Boolean) {
         if (this.content == null || forced) {
-            taskRepository!!.getTasks(this.taskType, this.userID!!)
-                    .flatMap<Task>({ Observable.from(it) })
+            taskRepository.getTasks(this.taskType, this.userID ?: "")
+                    .flatMap<Task> { Flowable.fromIterable(it) }
                     .map { task ->
                         task.parseMarkdown()
                         task
@@ -110,48 +107,15 @@ abstract class BaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(var taskTyp
                     .subscribeOn(Schedulers.io())
                     .observeOn(AndroidSchedulers.mainThread())
                     .toList()
-                    .subscribe(Action1 { this.setTasks(it) }, RxErrorHandler.handleEmptyError())
+                    .subscribe(Consumer { this.setTasks(it) }, RxErrorHandler.handleEmptyError())
         }
     }
 
     fun setTasks(tasks: List<Task>) {
         this.content = ArrayList()
-        this.content!!.addAll(tasks)
+        this.content?.addAll(tasks)
         filter()
     }
 
     open fun loadFromDatabase(): Boolean = true
-
-    fun checkTask(task: Task, completed: Boolean?) {
-        if (taskType != task.type)
-            return
-
-        if (completed!! && task.type == "todo") {
-            // remove from the list
-            content!!.remove(task)
-        }
-        this.updateTask(task)
-        filter()
-    }
-
-    fun addTask(task: Task) {
-        if (taskType != task.type)
-            return
-
-        content!!.add(0, task)
-        filter()
-    }
-
-    fun removeTask(deletedTaskId: String) {
-        val taskToDelete: Task? = content?.firstOrNull { it.id == deletedTaskId }
-
-        if (taskToDelete != null) {
-            content?.remove(taskToDelete)
-            filter()
-        }
-    }
-
-    open fun setDailyResetOffset(dayStart: Int) {
-
-    }
 }

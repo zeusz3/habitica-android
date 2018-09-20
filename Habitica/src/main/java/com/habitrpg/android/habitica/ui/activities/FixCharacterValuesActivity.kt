@@ -14,9 +14,9 @@ import com.habitrpg.android.habitica.models.user.User
 import com.habitrpg.android.habitica.modules.AppModule
 import com.habitrpg.android.habitica.ui.views.HabiticaIconsHelper
 import com.habitrpg.android.habitica.ui.views.settings.FixValuesEditText
+import io.reactivex.functions.Action
+import io.reactivex.functions.Consumer
 import kotlinx.android.synthetic.main.activity_fixcharacter.*
-import rx.functions.Action0
-import rx.functions.Action1
 import javax.inject.Inject
 import javax.inject.Named
 
@@ -40,7 +40,7 @@ class FixCharacterValuesActivity: BaseActivity() {
         setTitle(R.string.fix_character_values)
         setupToolbar(toolbar)
 
-        repository.getUser(userId).first().subscribe(Action1 {
+        repository.getUser(userId).firstElement().subscribe(Consumer {
             user = it
         }, RxErrorHandler.handleEmptyError())
     }
@@ -54,6 +54,7 @@ class FixCharacterValuesActivity: BaseActivity() {
         val id = item?.itemId
 
         if (id == R.id.action_save_changes) {
+            @Suppress("DEPRECATION")
             val progressDialog = ProgressDialog.show(this, getString(R.string.saving), "")
             val userInfo = HashMap<String, Any>()
             userInfo["stats.hp"] = healthEditText.getDoubleValue()
@@ -62,7 +63,7 @@ class FixCharacterValuesActivity: BaseActivity() {
             userInfo["stats.mp"] = manaEditText.getDoubleValue()
             userInfo["stats.lvl"] = levelEditText.getDoubleValue().toInt()
             userInfo["achievements.streak"] = streakEditText.getDoubleValue().toInt()
-            repository.updateUser(user, userInfo).subscribe(Action1 {}, RxErrorHandler.handleEmptyError(), Action0 {
+            repository.updateUser(user, userInfo).subscribe(Consumer {}, RxErrorHandler.handleEmptyError(), Action {
                 progressDialog.dismiss()
                 finish()
             })
@@ -88,7 +89,7 @@ class FixCharacterValuesActivity: BaseActivity() {
         levelEditText.text = user.stats?.lvl.toString()
         streakEditText.text = user.streakCount.toString()
 
-        when (user.stats.habitClass) {
+        when (user.stats?.habitClass) {
             Stats.WARRIOR -> {
                 levelEditText.iconBackgroundColor = ContextCompat.getColor(this, R.color.red_500)
                 levelEditText.setIconBitmap(HabiticaIconsHelper.imageOfWarriorLightBg())

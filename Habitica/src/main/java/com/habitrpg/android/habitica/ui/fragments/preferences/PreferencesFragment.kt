@@ -26,7 +26,7 @@ import com.habitrpg.android.habitica.prefs.TimePreference
 import com.habitrpg.android.habitica.ui.activities.ClassSelectionActivity
 import com.habitrpg.android.habitica.ui.activities.FixCharacterValuesActivity
 import com.habitrpg.android.habitica.ui.activities.MainActivity
-import rx.functions.Action1
+import io.reactivex.functions.Consumer
 import java.util.*
 import javax.inject.Inject
 
@@ -44,12 +44,12 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
     private var classSelectionPreference: Preference? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        HabiticaBaseApplication.getComponent().inject(this)
+        HabiticaBaseApplication.component?.inject(this)
         super.onCreate(savedInstanceState)
 
         val userID = preferenceManager.sharedPreferences.getString(context?.getString(R.string.SP_userID), null)
         if (userID != null) {
-            compositeSubscription.add(userRepository.getUser(userID).subscribe(Action1 { this@PreferencesFragment.setUser(it) }, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(userRepository.getUser(userID).subscribe(Consumer { this@PreferencesFragment.setUser(it) }, RxErrorHandler.handleEmptyError()))
         }
     }
 
@@ -82,7 +82,7 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
     override fun onPreferenceTreeClick(preference: Preference): Boolean {
         when(preference.key) {
             "logout" -> {
-                HabiticaApplication.logout(context)
+                context.notNull { HabiticaBaseApplication.logout(it) }
                 activity?.finish()
             }
             "choose_class" -> {
@@ -115,6 +115,7 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
                 return true
             }
             "reload_content" -> {
+                @Suppress("DEPRECATION")
                 val dialog = ProgressDialog.show(context, context?.getString(R.string.reloading_content), null, true)
                 inventoryRepository.retrieveContent(true).subscribe({
                     if (dialog.isShowing) {
@@ -166,7 +167,7 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
                 val pieces = timeval?.split(":".toRegex())?.dropLastWhile { it.isEmpty() }?.toTypedArray()
                 if (pieces != null) {
                     val hour = Integer.parseInt(pieces[0])
-                    userRepository.changeCustomDayStart(hour).subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+                    userRepository.changeCustomDayStart(hour).subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
                 }
             }
             "language" -> {
@@ -175,14 +176,16 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
                 Locale.setDefault(languageHelper.locale)
                 val configuration = Configuration()
                 if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN) {
+                    @Suppress("Deprecation")
                     configuration.locale = languageHelper.locale
                 } else {
                     configuration.setLocale(languageHelper.locale)
                 }
+                @Suppress("DEPRECATION")
                 activity?.resources?.updateConfiguration(configuration, activity?.resources?.displayMetrics)
                 userRepository.updateLanguage(user, languageHelper.languageCode)
                         .flatMap<ContentResult> { inventoryRepository.retrieveContent(true) }
-                        .subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+                        .subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
 
                 if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
                     val intent = Intent(activity, MainActivity::class.java)
@@ -197,12 +200,12 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
             "audioTheme" -> {
                 val newAudioTheme = sharedPreferences.getString(key, "off")
                 userRepository.updateUser(user, "preferences.sound", newAudioTheme)
-                        .subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+                        .subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
                 soundManager.soundTheme = newAudioTheme
                 soundManager.preloadAllFiles()
             }
             "dailyDueDefaultView" -> userRepository.updateUser(user, "preferences.dailyDueDefaultView", sharedPreferences.getBoolean(key, false))
-                    .subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+                    .subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
         }
     }
 
@@ -226,9 +229,9 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
 
     fun setUser(user: User?) {
         this.user = user
-        if (10 <= user?.stats?.getLvl() ?: 0) {
+        if (10 <= user?.stats?.lvl ?: 0) {
             if (user?.flags?.classSelected == true) {
-                if (user.preferences.disableClasses) {
+                if (user.preferences?.disableClasses == true) {
                     classSelectionPreference?.title = getString(R.string.enable_class)
                 } else {
                     classSelectionPreference?.title = getString(R.string.change_class)
@@ -240,8 +243,8 @@ class PreferencesFragment : BasePreferencesFragment(), SharedPreferences.OnShare
                 classSelectionPreference?.isVisible = true
             }
         }
-        val cdsTimePreference = findPreference("cds_time") as TimePreference
-        cdsTimePreference.text = user?.preferences?.dayStart.toString() + ":00"
+        val cdsTimePreference = findPreference("cds_time") as? TimePreference
+        cdsTimePreference?.text = user?.preferences?.dayStart.toString() + ":00"
         findPreference("dailyDueDefaultView").setDefaultValue(user?.preferences?.dailyDueDefaultView)
     }
 }

@@ -16,6 +16,7 @@ import com.facebook.drawee.view.DraweeHolder
 import com.facebook.drawee.view.MultiDraweeHolder
 import com.facebook.imagepipeline.image.ImageInfo
 import com.habitrpg.android.habitica.R
+import com.habitrpg.android.habitica.extensions.notNull
 import com.habitrpg.android.habitica.models.Avatar
 import java.util.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -42,8 +43,8 @@ class AvatarView : View {
 
     private val layerMap: Map<LayerType, String>
         get() {
-            assert(avatar != null)
-            return getLayerMap(avatar!!, true)
+            val avatar = this.avatar ?: return emptyMap()
+            return getLayerMap(avatar, true)
         }
 
 
@@ -139,7 +140,7 @@ class AvatarView : View {
                         }
 
                         override fun onFailure(id: String?, throwable: Throwable?) {
-                            Log.e(TAG, "Error loading layer: " + layerName, throwable)
+                            Log.e(TAG, "Error loading layer: $layerName", throwable)
                             onLayerComplete()
                         }
                     })
@@ -162,20 +163,20 @@ class AvatarView : View {
 
         val mountName = avatar.currentMount
         if (showMount && !TextUtils.isEmpty(mountName)) {
-            layerMap[LayerType.MOUNT_BODY] = "Mount_Body_" + mountName
-            layerMap[LayerType.MOUNT_HEAD] = "Mount_Head_" + mountName
+            layerMap[LayerType.MOUNT_BODY] = "Mount_Body_$mountName"
+            layerMap[LayerType.MOUNT_HEAD] = "Mount_Head_$mountName"
             if (resetHasAttributes) hasMount = true
         }
 
         val petName = avatar.currentPet
         if (showPet && !TextUtils.isEmpty(petName)) {
-            layerMap[LayerType.PET] = "Pet-" + petName
+            layerMap[LayerType.PET] = "Pet-$petName"
             if (resetHasAttributes) hasPet = true
         }
 
-        val backgroundName = avatar.background
+        val backgroundName = avatar.preferences?.background
         if (showBackground && !TextUtils.isEmpty(backgroundName)) {
-            layerMap[LayerType.BACKGROUND] = "background_" + backgroundName
+            layerMap[LayerType.BACKGROUND] = "background_$backgroundName"
             if (resetHasAttributes) hasBackground = true
         }
 
@@ -186,6 +187,7 @@ class AvatarView : View {
         return layerMap
     }
 
+    @Suppress("ReturnCount")
     private fun getAvatarLayerMap(avatar: Avatar): EnumMap<AvatarView.LayerType, String> {
         val layerMap = EnumMap<AvatarView.LayerType, String>(AvatarView.LayerType::class.java)
 
@@ -202,25 +204,25 @@ class AvatarView : View {
 
         var hasVisualBuffs = false
 
-        if (avatar.stats != null && avatar.stats.getBuffs() != null) {
-            val buffs = avatar.stats.getBuffs()
+        if (avatar.stats != null && avatar.stats?.buffs != null) {
+            val buffs = avatar.stats?.buffs
 
-            if (buffs.snowball) {
+            if (buffs?.snowball == true) {
                 layerMap[AvatarView.LayerType.VISUAL_BUFF] = "snowman"
                 hasVisualBuffs = true
             }
 
-            if (buffs.seafoam) {
+            if (buffs?.seafoam == true) {
                 layerMap[AvatarView.LayerType.VISUAL_BUFF] = "seafoam_star"
                 hasVisualBuffs = true
             }
 
-            if (buffs.shinySeed) {
-                layerMap[AvatarView.LayerType.VISUAL_BUFF] = "avatar_floral_" + avatar.stats.getHabitClass()
+            if (buffs?.shinySeed == true) {
+                layerMap[AvatarView.LayerType.VISUAL_BUFF] = "avatar_floral_" + avatar.stats?.habitClass
                 hasVisualBuffs = true
             }
 
-            if (buffs.spookySparkles) {
+            if (buffs?.spookySparkles == true) {
                 layerMap[AvatarView.LayerType.VISUAL_BUFF] = "ghost"
                 hasVisualBuffs = true
             }
@@ -327,7 +329,11 @@ class AvatarView : View {
                 AvatarView.LayerType.CHAIR, AvatarView.LayerType.BACK, AvatarView.LayerType.SKIN, AvatarView.LayerType.SHIRT, AvatarView.LayerType.ARMOR, AvatarView.LayerType.BODY, AvatarView.LayerType.HEAD_0, AvatarView.LayerType.HAIR_BASE, AvatarView.LayerType.HAIR_BANGS, AvatarView.LayerType.HAIR_MUSTACHE, AvatarView.LayerType.HAIR_BEARD, AvatarView.LayerType.EYEWEAR, AvatarView.LayerType.VISUAL_BUFF, AvatarView.LayerType.HEAD, AvatarView.LayerType.HEAD_ACCESSORY, AvatarView.LayerType.HAIR_FLOWER, AvatarView.LayerType.SHIELD, AvatarView.LayerType.WEAPON, AvatarView.LayerType.ZZZ -> if (showMount || showPet) {
                     // full hero box
                     offset = when {
-                        hasMount -> PointF(25.0f, 0f)
+                        hasMount -> if (layerMap[LayerType.MOUNT_HEAD]?.contains("Kangaroo") == true) {
+                            PointF(25.0f, 18f)
+                        } else {
+                            PointF(25.0f, 0f)
+                        }
                         hasPet -> PointF(25.0f, 24.5f)
                         else -> PointF(25.0f, 28.0f)
                     }
@@ -361,6 +367,8 @@ class AvatarView : View {
     private fun getFileName(imageName: String): String {
         val name = if (FILENAME_MAP.containsKey(imageName)) {
             FILENAME_MAP[imageName]
+        } else if (imageName.startsWith("handleless")) {
+            "chair_$imageName"
         } else {
             imageName
         }
@@ -434,7 +442,7 @@ class AvatarView : View {
         initAvatarRectMatrix()
 
         // draw only when user is set
-        if (avatar == null || !avatar!!.isValid) return
+        if (avatar?.isValid != true) return
 
         // request image layers if not yet processed
         if (multiDraweeHolder.size() == 0) {

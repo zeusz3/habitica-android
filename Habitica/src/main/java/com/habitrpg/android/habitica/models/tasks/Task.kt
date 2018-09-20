@@ -8,6 +8,7 @@ import com.habitrpg.android.habitica.R
 import com.habitrpg.android.habitica.models.Tag
 import com.habitrpg.android.habitica.models.user.Stats
 import com.habitrpg.android.habitica.ui.helpers.MarkdownParser
+import io.reactivex.functions.Consumer
 import io.realm.RealmList
 import io.realm.RealmObject
 import io.realm.annotations.Ignore
@@ -17,8 +18,9 @@ import org.json.JSONException
 import java.util.*
 
 open class Task : RealmObject, Parcelable {
-
-
+    @PrimaryKey
+    @SerializedName("_id")
+    var id: String? = null
     var userId: String = ""
     var priority: Float = 0.0f
     var text: String = ""
@@ -61,29 +63,41 @@ open class Task : RealmObject, Parcelable {
     var parsedText: CharSequence? = null
     @Ignore
     var parsedNotes: CharSequence? = null
-    @PrimaryKey
-    @SerializedName("_id")
-    var id: String? = null
-    set(value) {
-        field = value
-        repeat?.taskId = id
-    }
 
     var isDue: Boolean? = null
 
     var nextDue: Date? = null
     var yesterDaily: Boolean? = null
 
+    //Needed for offline creating/updating
+    var isSaving: Boolean = false
+    var hasErrored: Boolean = false
+    var isCreating: Boolean = false
+
     private var daysOfMonthString: String? = null
     private var weeksOfMonthString: String? = null
 
     @Ignore
     private var daysOfMonth: MutableList<Int>? = null
+
     @Ignore
     private var weeksOfMonth: MutableList<Int>? = null
 
     val completedChecklistCount: Int
         get() = checklist?.count { it.completed } ?: 0
+
+    val extraLightTaskColor: Int
+        get() {
+            return when {
+                this.value < -20 -> return R.color.maroon_500
+                this.value < -10 -> return R.color.red_500
+                this.value < -1 -> return R.color.orange_500
+                this.value < 1 -> return R.color.yellow_500
+                this.value < 5 -> return R.color.green_500
+                this.value < 10 -> return R.color.teal_500
+                else -> R.color.blue_500
+            }
+        }
 
     val lightTaskColor: Int
         get() {
@@ -179,15 +193,50 @@ open class Task : RealmObject, Parcelable {
 
     }
 
+    fun markdownText(callback: (CharSequence) -> Unit): CharSequence {
+        if (this.parsedText != null) {
+            return this.parsedText as CharSequence
+        }
+
+        MarkdownParser.parseMarkdownAsync(this.text, Consumer { parsedText ->
+            this.parsedText = parsedText
+            callback(parsedText)
+        })
+
+        return this.text
+    }
+
+    fun markdownNotes(callback: (CharSequence) -> Unit): CharSequence? {
+        if (this.parsedNotes != null) {
+            return this.parsedNotes as CharSequence
+        }
+
+        if (this.notes?.isEmpty() == true) {
+            return null
+        }
+
+        MarkdownParser.parseMarkdownAsync(this.notes, Consumer { parsedText ->
+            this.parsedNotes = parsedText
+            callback(parsedText)
+        })
+
+        return this.notes
+    }
+
     override fun equals(other: Any?): Boolean {
         if (other == null) {
             return false
         }
-        if (Task::class.java.isAssignableFrom(other.javaClass)) {
-            val otherTask = other as Task
-            return this.id == otherTask.id
+        return if (Task::class.java.isAssignableFrom(other.javaClass)) {
+            val otherTask = other as? Task
+            this.id == otherTask?.id
+        } else {
+            super.equals(other)
         }
-        return super.equals(other)
+    }
+
+    override fun hashCode(): Int {
+        return id?.hashCode() ?: 0
     }
 
     override fun describeContents(): Int = 0
@@ -218,11 +267,11 @@ open class Task : RealmObject, Parcelable {
         dest.writeString(this.id)
     }
 
-    constructor() {}
+    constructor()
 
     protected constructor(`in`: Parcel) {
         this.userId = `in`.readString()
-        this.priority = `in`.readValue(Float::class.java.classLoader) as Float
+        this.priority = `in`.readValue(Float::class.java.classLoader) as? Float ?: 0f
         this.text = `in`.readString()
         this.notes = `in`.readString()
         this.attribute = `in`.readString()
@@ -233,16 +282,16 @@ open class Task : RealmObject, Parcelable {
         val tmpDateCreated = `in`.readLong()
         this.dateCreated = if (tmpDateCreated == -1L) null else Date(tmpDateCreated)
         this.position = `in`.readInt()
-        this.up = `in`.readValue(Boolean::class.java.classLoader) as Boolean
-        this.down = `in`.readValue(Boolean::class.java.classLoader) as Boolean
+        this.up = `in`.readValue(Boolean::class.java.classLoader) as? Boolean ?: false
+        this.down = `in`.readValue(Boolean::class.java.classLoader) as? Boolean ?: false
         this.completed = `in`.readByte().toInt() != 0
         this.checklist = RealmList()
         `in`.readList(this.checklist, ChecklistItem::class.java.classLoader)
         this.reminders = RealmList()
         `in`.readList(this.reminders, RemindersItem::class.java.classLoader)
         this.frequency = `in`.readString()
-        this.everyX = `in`.readValue(Int::class.java.classLoader) as Int
-        this.streak = `in`.readValue(Int::class.java.classLoader) as Int
+        this.everyX = `in`.readValue(Int::class.java.classLoader) as? Int ?: 1
+        this.streak = `in`.readValue(Int::class.java.classLoader) as? Int ?: 0
         val tmpStartDate = `in`.readLong()
         this.startDate = if (tmpStartDate == -1L) null else Date(tmpStartDate)
         this.repeat = `in`.readParcelable(Days::class.java.classLoader)
@@ -255,7 +304,7 @@ open class Task : RealmObject, Parcelable {
 
     fun setWeeksOfMonth(weeksOfMonth: MutableList<Int>) {
         this.weeksOfMonth = weeksOfMonth
-        this.weeksOfMonthString = this.weeksOfMonth!!.toString()
+        this.weeksOfMonthString = this.weeksOfMonth?.toString()
     }
 
     fun getWeeksOfMonth(): List<Int>? {
@@ -266,7 +315,7 @@ open class Task : RealmObject, Parcelable {
                     val obj = JSONArray(weeksOfMonthString)
                     var i = 0
                     while (i < obj.length()) {
-                        weeksOfMonth!!.add(obj.getInt(i))
+                        weeksOfMonth?.add(obj.getInt(i))
                         i += 1
                     }
                 } catch (e: JSONException) {
@@ -282,7 +331,7 @@ open class Task : RealmObject, Parcelable {
 
     fun setDaysOfMonth(daysOfMonth: MutableList<Int>) {
         this.daysOfMonth = daysOfMonth
-        this.daysOfMonthString = this.daysOfMonth!!.toString()
+        this.daysOfMonthString = daysOfMonth.toString()
     }
 
     fun getDaysOfMonth(): List<Int>? {
@@ -293,7 +342,7 @@ open class Task : RealmObject, Parcelable {
                     val obj = JSONArray(daysOfMonthString)
                     var i = 0
                     while (i < obj.length()) {
-                        daysOfMonth!!.add(obj.getInt(i))
+                        daysOfMonth?.add(obj.getInt(i))
                         i += 1
                     }
                 } catch (e: JSONException) {
@@ -308,7 +357,11 @@ open class Task : RealmObject, Parcelable {
         return daysOfMonth
     }
 
-    companion object {
+    companion object CREATOR: Parcelable.Creator<Task> {
+        override fun createFromParcel(source: Parcel): Task = Task(source)
+
+        override fun newArray(size: Int): Array<Task?> = arrayOfNulls(size)
+
         const val TYPE_HABIT = "habit"
         const val TYPE_TODO = "todo"
         const val TYPE_DAILY = "daily"
@@ -323,7 +376,9 @@ open class Task : RealmObject, Parcelable {
         const val FILTER_COMPLETED = "completed"
         const val FREQUENCY_WEEKLY = "weekly"
         const val FREQUENCY_DAILY = "daily"
+        const val FREQUENCY_MONTHLY = "monthly"
 
+        @JvmField
         val CREATOR: Parcelable.Creator<Task> = object : Parcelable.Creator<Task> {
             override fun createFromParcel(source: Parcel): Task = Task(source)
 

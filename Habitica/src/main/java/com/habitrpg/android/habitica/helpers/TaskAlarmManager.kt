@@ -13,14 +13,14 @@ import com.habitrpg.android.habitica.models.tasks.RemindersItem
 import com.habitrpg.android.habitica.models.tasks.Task
 import com.habitrpg.android.habitica.receivers.NotificationPublisher
 import com.habitrpg.android.habitica.receivers.TaskReceiver
+import io.reactivex.Flowable
+import io.reactivex.functions.Consumer
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
-import rx.Observable
-import rx.functions.Action1
 import java.util.*
 
 class TaskAlarmManager(private var context: Context, private var taskRepository: TaskRepository, private var userId: String) {
-    private val am: AlarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    private val am: AlarmManager? = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
 
     init {
         EventBus.getDefault().register(this)
@@ -60,17 +60,20 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
     fun addAlarmForTaskId(taskId: String) {
         taskRepository.getTaskCopy(taskId)
                 .filter { task -> task.isValid && task.isManaged && Task.TYPE_DAILY == task.type }
-                .first()
-                .subscribe(Action1 { this.setAlarmsForTask(it) }, RxErrorHandler.handleEmptyError())
+                .firstElement()
+                .subscribe(Consumer { this.setAlarmsForTask(it) }, RxErrorHandler.handleEmptyError())
     }
 
-    fun scheduleAllSavedAlarms() {
+    fun scheduleAllSavedAlarms(preventDailyReminder: Boolean) {
         taskRepository.getTaskCopies(userId)
-                .first()
-                .flatMap<Task>({ Observable.from(it) })
-                .subscribe(Action1 { this.setAlarmsForTask(it) }, RxErrorHandler.handleEmptyError())
+                .firstElement()
+                .toFlowable()
+                .flatMap<Task> { Flowable.fromIterable(it) }
+                .subscribe(Consumer { this.setAlarmsForTask(it) }, RxErrorHandler.handleEmptyError())
 
-        scheduleDailyReminder(context)
+        if (!preventDailyReminder) {
+            scheduleDailyReminder(context)
+        }
         val editor = PreferenceManager.getDefaultSharedPreferences(context).edit()
         editor.putLong("lastReminderSchedule", Date().time)
         editor.apply()
@@ -85,6 +88,7 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
         val newTime = task.getNextReminderOccurence(oldTime) ?: return null
         val calendar = Calendar.getInstance()
         calendar.time = newTime
+        @Suppress("DEPRECATION")
         calendar.set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DATE), oldTime?.hours ?: 0, oldTime?.minutes ?: 0, 0)
         remindersItem?.time = calendar.time
         return remindersItem
@@ -92,7 +96,7 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
 
     private fun setAlarmForRemindersItem(reminderItemTask: Task, remindersItem: RemindersItem?) {
         val now = Date()
-        if (remindersItem == null || remindersItem.time.before(now)) {
+        if (remindersItem == null || remindersItem.time?.before(now) == true) {
             return
         }
 
@@ -104,12 +108,12 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
         intent.putExtra(TASK_NAME_INTENT_KEY, reminderItemTask.text)
         intent.putExtra(TASK_ID_INTENT_KEY, reminderItemTask.id)
 
-        val intentId = remindersItem.id.hashCode() and 0xfffffff
+        val intentId = remindersItem.id?.hashCode() ?: 0 and 0xfffffff
         //Cancel alarm if already exists
         val previousSender = PendingIntent.getBroadcast(context, intentId, intent, PendingIntent.FLAG_NO_CREATE)
         if (previousSender != null) {
             previousSender.cancel()
-            am.cancel(previousSender)
+            am?.cancel(previousSender)
         }
 
         val sender = PendingIntent.getBroadcast(context, intentId, intent, PendingIntent.FLAG_CANCEL_CURRENT)
@@ -122,7 +126,7 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
     private fun removeAlarmForRemindersItem(remindersItem: RemindersItem) {
         val intent = Intent(context, TaskReceiver::class.java)
         intent.action = remindersItem.id
-        val intentId = remindersItem.id.hashCode() and 0xfffffff
+        val intentId = remindersItem.id?.hashCode() ?: 0 and 0xfffffff
         val sender = PendingIntent.getBroadcast(context, intentId, intent, PendingIntent.FLAG_UPDATE_CURRENT)
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         sender.cancel()
@@ -154,7 +158,7 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
                 notificationIntent.putExtra(NotificationPublisher.NOTIFICATION_ID, 1)
                 notificationIntent.putExtra(NotificationPublisher.CHECK_DAILIES, false)
 
-                val alarmManager = context?.getSystemService(Context.ALARM_SERVICE) as AlarmManager?
+                val alarmManager = context?.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                 val previousSender = PendingIntent.getBroadcast(context, 0, notificationIntent, PendingIntent.FLAG_NO_CREATE)
                 if (previousSender != null) {
                     previousSender.cancel()
@@ -171,24 +175,24 @@ class TaskAlarmManager(private var context: Context, private var taskRepository:
 
         fun removeDailyReminder(context: Context?) {
             val notificationIntent = Intent(context, NotificationPublisher::class.java)
-            val alarmManager = context?.getSystemService(Context.ALARM_SERVICE) as AlarmManager?
+            val alarmManager = context?.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             val displayIntent = PendingIntent.getBroadcast(context, 0, notificationIntent, 0)
             alarmManager?.cancel(displayIntent)
         }
 
         private fun setAlarm(context: Context, time: Long, pendingIntent: PendingIntent?) {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
 
             if (pendingIntent == null) {
                 return
             }
 
             if (SDK_INT < Build.VERSION_CODES.KITKAT) {
-                alarmManager.set(AlarmManager.RTC_WAKEUP, time, pendingIntent)
+                alarmManager?.set(AlarmManager.RTC_WAKEUP, time, pendingIntent)
             } else if (Build.VERSION_CODES.KITKAT <= SDK_INT && SDK_INT < Build.VERSION_CODES.M) {
-                alarmManager.setWindow(AlarmManager.RTC_WAKEUP, time, time + 60000, pendingIntent)
+                alarmManager?.setWindow(AlarmManager.RTC_WAKEUP, time, time + 60000, pendingIntent)
             } else if (SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, pendingIntent)
+                alarmManager?.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, pendingIntent)
             }
         }
     }

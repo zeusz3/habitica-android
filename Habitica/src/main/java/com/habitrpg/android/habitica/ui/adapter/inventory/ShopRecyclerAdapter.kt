@@ -1,37 +1,27 @@
 package com.habitrpg.android.habitica.ui.adapter.inventory
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Shader
-import android.graphics.drawable.BitmapDrawable
 import android.support.v7.widget.RecyclerView
 import android.text.Html
 import android.text.method.LinkMovementMethod
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.ImageView
 import android.widget.TextView
-import com.facebook.drawee.view.SimpleDraweeView
 import com.habitrpg.android.habitica.R
 import com.habitrpg.android.habitica.events.commands.OpenGemPurchaseFragmentCommand
-import com.habitrpg.android.habitica.extensions.backgroundCompat
-import com.habitrpg.android.habitica.extensions.bindView
+import com.habitrpg.android.habitica.ui.helpers.bindView
 import com.habitrpg.android.habitica.extensions.inflate
-import com.habitrpg.android.habitica.helpers.RxErrorHandler
+import com.habitrpg.android.habitica.extensions.notNull
 import com.habitrpg.android.habitica.models.inventory.Item
 import com.habitrpg.android.habitica.models.shops.Shop
 import com.habitrpg.android.habitica.models.shops.ShopCategory
 import com.habitrpg.android.habitica.models.shops.ShopItem
 import com.habitrpg.android.habitica.models.user.User
-import com.habitrpg.android.habitica.ui.helpers.DataBindingUtils
 import com.habitrpg.android.habitica.ui.viewHolders.SectionViewHolder
 import com.habitrpg.android.habitica.ui.viewHolders.ShopItemViewHolder
 import com.habitrpg.android.habitica.ui.views.NPCBannerView
 import org.greenrobot.eventbus.EventBus
-import rx.Observable
-import rx.android.schedulers.AndroidSchedulers
-import rx.functions.Action1
 
 
 class ShopRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -120,43 +110,46 @@ class ShopRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         val obj = getItem(position)
         if (obj != null) {
             when (obj.javaClass) {
-                Shop::class.java -> (holder as ShopHeaderViewHolder).bind(obj as Shop, shopSpriteSuffix)
+                Shop::class.java -> (obj as? Shop).notNull { (holder as? ShopHeaderViewHolder)?.bind(it, shopSpriteSuffix) }
                 ShopCategory::class.java -> {
-                    val category = obj as ShopCategory
-                    (holder as SectionViewHolder).bind((category).text)
+                    val category = obj as? ShopCategory
+                    val sectionHolder = holder as? SectionViewHolder ?: return
+                    sectionHolder.bind(category?.text ?: "")
                     if (gearCategories.contains(category)) {
                         val adapter = HabiticaClassArrayAdapter(context, R.layout.class_spinner_dropdown_item, gearCategories.map { it.identifier })
-                        holder.spinnerAdapter = adapter
-                        holder.selectedItem = gearCategories.indexOf(category)
-                        holder.spinnerSelectionChanged = {
+                        sectionHolder.spinnerAdapter = adapter
+                        sectionHolder.selectedItem = gearCategories.indexOf(category)
+                        sectionHolder.spinnerSelectionChanged = {
                             if (selectedGearCategory != gearCategories[holder.selectedItem].identifier) {
                                 selectedGearCategory = gearCategories[holder.selectedItem].identifier
                             }
                         }
-                        if (user?.stats?.habitClass != category.identifier) {
-                            holder.notesView?.text = context?.getString(R.string.class_gear_disclaimer)
-                            holder.notesView?.visibility = View.VISIBLE
+                        if (user?.stats?.habitClass != category?.identifier) {
+                            sectionHolder.notesView?.text = context?.getString(R.string.class_gear_disclaimer)
+                            sectionHolder.notesView?.visibility = View.VISIBLE
                         } else {
-                            holder.notesView?.visibility = View.GONE
+                            sectionHolder.notesView?.visibility = View.GONE
                         }
                     } else {
-                        holder.spinnerAdapter = null
-                        holder.notesView?.visibility = View.GONE
+                        sectionHolder.spinnerAdapter = null
+                        sectionHolder.notesView?.visibility = View.GONE
                     }
                 }
                 ShopItem::class.java -> {
                     val item = obj as ShopItem
-                    (holder as ShopItemViewHolder).bind(item, item.canAfford(user))
+                    val itemHolder = holder as? ShopItemViewHolder ?: return
+                    itemHolder.bind(item, item.canAfford(user))
                     if (ownedItems.containsKey(item.key+"-"+item.pinType)) {
-                        holder.itemCount = ownedItems[item.key+"-"+item.pinType]?.owned ?: 0
+                        itemHolder.itemCount = ownedItems[item.key+"-"+item.pinType]?.owned ?: 0
                     }
-                    holder.isPinned = pinnedItemKeys.contains(item.key)
+                    itemHolder.isPinned = pinnedItemKeys.contains(item.key)
                 }
-                String::class.java -> (holder as EmptyStateViewHolder).text = obj as String
+                String::class.java -> (holder as? EmptyStateViewHolder)?.text = obj as? String
             }
         }
     }
 
+    @Suppress("ReturnCount")
     private fun getItem(position: Int): Any? {
         if (items.size == 0) {
             return null
@@ -202,8 +195,8 @@ class ShopRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             0
         } else {
             val selectedCategory: ShopCategory? = getSelectedShopCategory()
-            return if (selectedCategory != null) {
-                return if (selectedCategory.items.size == 0) {
+            if (selectedCategory != null) {
+                if (selectedCategory.items.size == 0) {
                     2
                 } else {
                     selectedCategory.items.size+1
@@ -241,6 +234,7 @@ class ShopRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             npcBannerView.shopSpriteSuffix = shopSpriteSuffix
             npcBannerView.identifier = shop.identifier
 
+            @Suppress("DEPRECATION")
             descriptionView.text = Html.fromHtml(shop.notes)
             namePlate.setText(shop.npcNameResource)
         }

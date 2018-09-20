@@ -15,6 +15,10 @@ import com.habitrpg.android.habitica.models.user.User;
 import com.habitrpg.android.habitica.ui.viewHolders.ShopItemViewHolder;
 import com.habitrpg.android.habitica.ui.viewHolders.tasks.RewardViewHolder;
 
+import io.reactivex.BackpressureStrategy;
+import io.reactivex.Flowable;
+import io.reactivex.functions.Action;
+import io.reactivex.subjects.PublishSubject;
 import io.realm.OrderedRealmCollection;
 
 public class RewardsRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> implements TaskRecyclerViewAdapter {
@@ -29,6 +33,8 @@ public class RewardsRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
     private final int layoutResource;
     @Nullable
     private User user;
+
+    private PublishSubject<String> errorButtonEvents = PublishSubject.create();
 
     public RewardsRecyclerViewAdapter(@Nullable OrderedRealmCollection<Task> data, Context context, int layoutResource, @Nullable User user) {
         this.context = context;
@@ -92,6 +98,11 @@ public class RewardsRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
     }
 
     @Override
+    public Flowable<String> getErrorButtonEvents() {
+        return errorButtonEvents.toFlowable(BackpressureStrategy.DROP);
+    }
+
+    @Override
     public int getItemCount() {
         int rewardCount = getCustomRewardCount();
         rewardCount += getInAppRewardCount();
@@ -125,5 +136,10 @@ public class RewardsRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
 
     @Override
     public void filter() {
+    }
+
+    @Override
+    public String getTaskIDAt(int position) {
+        return customRewards.get(position).getId();
     }
 }

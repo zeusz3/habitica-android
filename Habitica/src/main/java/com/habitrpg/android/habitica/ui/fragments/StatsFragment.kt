@@ -1,6 +1,7 @@
 package com.habitrpg.android.habitica.ui.fragments
 
 import android.app.AlertDialog
+import android.os.Build
 import android.os.Bundle
 import android.support.v4.content.ContextCompat
 import android.view.LayoutInflater
@@ -18,10 +19,10 @@ import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.helpers.UserStatComputer
 import com.habitrpg.android.habitica.models.user.Stats
 import com.habitrpg.android.habitica.modules.AppModule
-import com.habitrpg.android.habitica.ui.views.stats.BulkAllocateStatsDialog
 import com.habitrpg.android.habitica.ui.views.HabiticaIconsHelper
+import com.habitrpg.android.habitica.ui.views.stats.BulkAllocateStatsDialog
+import io.reactivex.functions.Consumer
 import kotlinx.android.synthetic.main.fragment_stats.*
-import rx.functions.Action1
 import java.util.*
 import javax.inject.Inject
 import javax.inject.Named
@@ -81,12 +82,16 @@ class StatsFragment: BaseMainFragment() {
 
         leftSparklesView.setImageBitmap(HabiticaIconsHelper.imageOfAttributeSparklesLeft())
         rightSparklesView.setImageBitmap(HabiticaIconsHelper.imageOfAttributeSparklesRight())
-        distributeEvenlyHelpButton.setImageBitmap(HabiticaIconsHelper.imageOfInfoIcon())
-        distributeClassHelpButton.setImageBitmap(HabiticaIconsHelper.imageOfInfoIcon())
-        distributeTaskHelpButton.setImageBitmap(HabiticaIconsHelper.imageOfInfoIcon())
+        context.notNull {
+            val color = ContextCompat.getColor(it, R.color.brand_200)
+            distributeEvenlyHelpButton.setImageBitmap(HabiticaIconsHelper.imageOfInfoIcon(color))
+            distributeClassHelpButton.setImageBitmap(HabiticaIconsHelper.imageOfInfoIcon(color))
+            distributeTaskHelpButton.setImageBitmap(HabiticaIconsHelper.imageOfInfoIcon(color))
+        }
 
-        compositeSubscription.add(userRepository.getUser(userId).subscribe(Action1 {
+        compositeSubscription.add(userRepository.getUser(userId).subscribe(Consumer {
             user = it
+            unlock_at_level.visibility = if (user?.stats?.lvl ?: 0 < 10) View.VISIBLE else View.GONE
             updateStats()
             updateAttributePoints()
         }, RxErrorHandler.handleEmptyError()))
@@ -108,7 +113,7 @@ class StatsFragment: BaseMainFragment() {
         }
 
         automaticAllocationSwitch.setOnCheckedChangeListener{ _, isChecked ->
-            userRepository.updateUser(user, "preferences.automaticAllocation", isChecked).subscribe(Action1 {}, RxErrorHandler.handleEmptyError())
+            userRepository.updateUser(user, "preferences.automaticAllocation", isChecked).subscribe(Consumer {}, RxErrorHandler.handleEmptyError())
         }
 
         strengthStatsView.allocateAction = { allocatePoint(Stats.STRENGTH) }
@@ -122,20 +127,23 @@ class StatsFragment: BaseMainFragment() {
 
         statsAllocationButton.setOnClickListener {
             if (user?.stats?.points ?: 0 > 0) {
-                showBulkAllocateDialog()
+                val lvl = user?.stats?.lvl
+                if (lvl != null && lvl >= 10) {
+                    showBulkAllocateDialog()
+                }
             }
         }
     }
 
     private fun showBulkAllocateDialog() {
         context.notNull { context ->
-            val dialog = BulkAllocateStatsDialog(context, HabiticaBaseApplication.getComponent())
+            val dialog = BulkAllocateStatsDialog(context, HabiticaBaseApplication.component)
             dialog.show()
         }
     }
 
     private fun changeAutoAllocationMode(@Stats.AutoAllocationTypes allocationMode: String) {
-        userRepository.updateUser(user, "preferences.allocationMode", allocationMode).subscribe(Action1 {}, RxErrorHandler.handleEmptyError())
+        userRepository.updateUser(user, "preferences.allocationMode", allocationMode).subscribe(Consumer {}, RxErrorHandler.handleEmptyError())
         distributeEvenlyButton.isChecked = allocationMode == Stats.AUTO_ALLOCATE_FLAT
         distributeClassButton.isChecked = allocationMode == Stats.AUTO_ALLOCATE_CLASSBASED
         distributeTaskButton.isChecked = allocationMode == Stats.AUTO_ALLOCATE_TASKBASED
@@ -148,7 +156,7 @@ class StatsFragment: BaseMainFragment() {
     }
 
     private fun allocatePoint(@Stats.StatsTypes stat: String) {
-        userRepository.allocatePoint(user, stat).subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+        userRepository.allocatePoint(user, stat).subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
     }
 
     private fun updateAttributePoints() {
@@ -178,7 +186,9 @@ class StatsFragment: BaseMainFragment() {
                 val points = user?.stats?.points ?: 0
                 numberOfPointsTextView.text = getString(R.string.points_to_allocate, points)
                 numberOfPointsTextView.setTextColor(ContextCompat.getColor(context, R.color.white))
-                numberOfPointsTextView.background = ContextCompat.getDrawable(context, R.drawable.button_gray_100)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                    numberOfPointsTextView.background = ContextCompat.getDrawable(context, R.drawable.button_gray_100)
+                }
                 leftSparklesView.visibility = View.VISIBLE
                 rightSparklesView.visibility = View.VISIBLE
             } else {
@@ -198,7 +208,7 @@ class StatsFragment: BaseMainFragment() {
 
     private fun updateStats() {
         val currentUser = user ?: return
-        val levelStat = Math.min(currentUser.stats.getLvl() / 2.0f, 50f).toInt()
+        val levelStat = Math.min((currentUser.stats?.lvl ?: 0) / 2.0f, 50f).toInt()
 
         totalStrength = levelStat
         totalIntelligence = levelStat
@@ -219,29 +229,31 @@ class StatsFragment: BaseMainFragment() {
         constitutionStatsView.buffValue = currentUser.stats?.buffs?.con?.toInt() ?: 0
         perceptionStatsView.buffValue = currentUser.stats?.buffs?.per?.toInt() ?: 0
 
-        totalStrength += currentUser.stats?.str?.toInt() ?: 0
-        totalIntelligence += currentUser.stats?._int?.toInt() ?: 0
-        totalConstitution += currentUser.stats?.con?.toInt() ?: 0
-        totalPerception += currentUser.stats?.per?.toInt() ?: 0
-        strengthStatsView.allocatedValue = currentUser.stats?.str?.toInt() ?: 0
-        intelligenceStatsView.allocatedValue = currentUser.stats?._int?.toInt() ?: 0
-        constitutionStatsView.allocatedValue = currentUser.stats?.con?.toInt() ?: 0
-        perceptionStatsView.allocatedValue = currentUser.stats?.per?.toInt() ?: 0
+        totalStrength += currentUser.stats?.str ?: 0
+        totalIntelligence += currentUser.stats?._int ?: 0
+        totalConstitution += currentUser.stats?.con ?: 0
+        totalPerception += currentUser.stats?.per ?: 0
+        strengthStatsView.allocatedValue = currentUser.stats?.str ?: 0
+        intelligenceStatsView.allocatedValue = currentUser.stats?._int ?: 0
+        constitutionStatsView.allocatedValue = currentUser.stats?.con ?: 0
+        perceptionStatsView.allocatedValue = currentUser.stats?.per ?: 0
 
-        val outfit = currentUser.items.gear.equipped
+        val outfit = currentUser.items?.gear?.equipped
         val outfitList = ArrayList<String>()
-        outfitList.add(outfit.armor)
-        outfitList.add(outfit.back)
-        outfitList.add(outfit.body)
-        outfitList.add(outfit.eyeWear)
-        outfitList.add(outfit.head)
-        outfitList.add(outfit.headAccessory)
-        outfitList.add(outfit.shield)
-        outfitList.add(outfit.weapon)
+        outfit.notNull { thisOutfit ->
+            outfitList.add(thisOutfit.armor)
+            outfitList.add(thisOutfit.back)
+            outfitList.add(thisOutfit.body)
+            outfitList.add(thisOutfit.eyeWear)
+            outfitList.add(thisOutfit.head)
+            outfitList.add(thisOutfit.headAccessory)
+            outfitList.add(thisOutfit.shield)
+            outfitList.add(thisOutfit.weapon)
+        }
 
-        inventoryRepository.getItems(outfitList).first()
+        inventoryRepository.getItems(outfitList).firstElement()
                 .retry(1)
-                .subscribe(Action1 {
+                .subscribe(Consumer {
             val userStatComputer = UserStatComputer()
             val statsRows = userStatComputer.computeClassBonus(it, user)
 

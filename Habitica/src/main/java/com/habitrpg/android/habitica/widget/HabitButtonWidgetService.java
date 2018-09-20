@@ -28,6 +28,7 @@ import net.pherth.android.emoji_library.EmojiHandler;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -51,14 +52,14 @@ public class HabitButtonWidgetService extends Service {
 
     @Override
     public int onStartCommand(final Intent intent, int flags, int startId) {
-        HabiticaBaseApplication.getComponent().inject(this);
+        Objects.requireNonNull(HabiticaBaseApplication.Companion.getComponent()).inject(this);
         this.appWidgetManager = AppWidgetManager.getInstance(this);
         ComponentName thisWidget = new ComponentName(this, HabitButtonWidgetProvider.class);
         allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
         makeTaskMapping();
 
         for (String taskid : this.taskMapping.keySet()) {
-            taskRepository.getUnmanagedTask(taskid).first().subscribe(this::updateData, RxErrorHandler.handleEmptyError());
+            taskRepository.getUnmanagedTask(taskid).firstElement().subscribe(this::updateData, RxErrorHandler.handleEmptyError());
         }
 
         stopSelf();
@@ -69,7 +70,7 @@ public class HabitButtonWidgetService extends Service {
     private void updateData(Task task) {
         RemoteViews remoteViews = new RemoteViews(this.getPackageName(), R.layout.widget_habit_button);
         if (task != null && task.isValid()) {
-            CharSequence parsedText = MarkdownParser.parseMarkdown(task.getText());
+            CharSequence parsedText = MarkdownParser.INSTANCE.parseMarkdown(task.getText());
 
             SpannableStringBuilder builder = new SpannableStringBuilder(parsedText);
             EmojiHandler.addEmojis(this.context, builder, 16, DynamicDrawableSpan.ALIGN_BASELINE, 16, 0, -1, false);

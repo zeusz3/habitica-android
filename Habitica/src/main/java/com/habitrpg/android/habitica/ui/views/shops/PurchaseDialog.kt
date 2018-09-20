@@ -17,7 +17,7 @@ import com.habitrpg.android.habitica.data.UserRepository
 import com.habitrpg.android.habitica.events.GearPurchasedEvent
 import com.habitrpg.android.habitica.events.ShowSnackbarEvent
 import com.habitrpg.android.habitica.events.commands.OpenGemPurchaseFragmentCommand
-import com.habitrpg.android.habitica.extensions.bindView
+import com.habitrpg.android.habitica.ui.helpers.bindView
 import com.habitrpg.android.habitica.helpers.RemoteConfigManager
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.inventory.Equipment
@@ -33,14 +33,15 @@ import com.habitrpg.android.habitica.ui.views.insufficientCurrency.InsufficientG
 import com.habitrpg.android.habitica.ui.views.insufficientCurrency.InsufficientGoldDialog
 import com.habitrpg.android.habitica.ui.views.insufficientCurrency.InsufficientHourglassesDialog
 import com.habitrpg.android.habitica.ui.views.insufficientCurrency.InsufficientSubscriberGemsDialog
+import com.playseeds.android.sdk.inappmessaging.Log
+import io.reactivex.Flowable
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.functions.Consumer
 import org.greenrobot.eventbus.EventBus
-import rx.Observable
-import rx.functions.Action1
-import rx.subscriptions.CompositeSubscription
 import java.util.*
 import javax.inject.Inject
 
-class PurchaseDialog(context: Context, component: AppComponent, val item: ShopItem) : AlertDialog(context) {
+class PurchaseDialog(context: Context, component: AppComponent?, val item: ShopItem) : AlertDialog(context) {
 
     @Inject
     lateinit var userRepository: UserRepository
@@ -88,11 +89,11 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
                 shopItem.isTypeItem -> contentView = PurchaseDialogItemContent(context)
                 shopItem.isTypeQuest -> {
                     contentView = PurchaseDialogQuestContent(context)
-                    inventoryRepository.getQuestContent(shopItem.key).first().subscribe(Action1<QuestContent> { contentView.setQuestContent(it) }, RxErrorHandler.handleEmptyError())
+                    inventoryRepository.getQuestContent(shopItem.key).firstElement().subscribe(Consumer<QuestContent> { contentView.setQuestContent(it) }, RxErrorHandler.handleEmptyError())
                 }
                 shopItem.isTypeGear -> {
                     contentView = PurchaseDialogGearContent(context)
-                    inventoryRepository.getEquipment(shopItem.key).first().subscribe(Action1<Equipment> { contentView.setEquipment(it) }, RxErrorHandler.handleEmptyError())
+                    inventoryRepository.getEquipment(shopItem.key).firstElement().subscribe(Consumer<Equipment> { contentView.setEquipment(it) }, RxErrorHandler.handleEmptyError())
                     checkGearClass()
                 }
                 "gems" == shopItem.purchaseType -> contentView = PurchaseDialogGemsContent(context)
@@ -111,7 +112,7 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
             return
         }
 
-        if (shopItem.habitClass != null && shopItem.habitClass != "special" && user.stats.habitClass != shopItem.habitClass) {
+        if (shopItem.habitClass != "special" && user.stats?.habitClass != shopItem.habitClass) {
             limitedTextView.text = context.getString(R.string.class_equipment_shop_dialog)
             limitedTextView.visibility = View.VISIBLE
             limitedTextView.setBackgroundColor(ContextCompat.getColor(context, R.color.gray_100))
@@ -120,7 +121,7 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
         }
     }
 
-    private val compositeSubscription: CompositeSubscription = CompositeSubscription()
+    private val compositeSubscription: CompositeDisposable = CompositeDisposable()
     var shopIdentifier: String? = null
     private var user: User? = null
     var isPinned: Boolean = false
@@ -133,13 +134,13 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
             }
         }
     init {
-        component.inject(this)
+        component?.inject(this)
 
         setView(customView)
 
         shopItem = item
 
-        compositeSubscription.add(userRepository.getUser().subscribe(Action1<User> { this.setUser(it) }, RxErrorHandler.handleEmptyError()))
+        compositeSubscription.add(userRepository.getUser().subscribe(Consumer<User> { this.setUser(it) }, RxErrorHandler.handleEmptyError()))
 
         if (!this.configManager.newShopsEnabled()) {
             pinButton.visibility = View.GONE
@@ -147,18 +148,18 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
 
         closeButton.setOnClickListener { dismiss() }
         buyButton.setOnClickListener { onBuyButtonClicked() }
-        pinButton.setOnClickListener { inventoryRepository.togglePinnedItem(shopItem).subscribe(Action1 { isPinned = !this.isPinned }, RxErrorHandler.handleEmptyError()) }
+        pinButton.setOnClickListener { _-> inventoryRepository.togglePinnedItem(shopItem).subscribe(Consumer { isPinned = !this.isPinned }, RxErrorHandler.handleEmptyError()) }
     }
 
     private fun setUser(user: User) {
         this.user = user
-        currencyView.gold = user.stats.getGp()
+        currencyView.gold = user.stats?.gp ?: 0.0
         currencyView.gems = user.gemCount.toDouble()
-        currencyView.hourglasses = user.hourglassCount.toDouble()
+        currencyView.hourglasses = user.hourglassCount?.toDouble() ?: 0.0
 
         if ("gems" == shopItem.purchaseType) {
-            val gemsLeft = if (shopItem.limitedNumberLeft != null) shopItem.limitedNumberLeft else 0
-            val maxGems = user.purchased.plan.totalNumberOfGems()
+            val maxGems = user.purchased?.plan?.totalNumberOfGems() ?: 0
+            val gemsLeft = user.purchased?.plan?.numberOfGemsLeft()
             if (maxGems > 0) {
                 limitedTextView.text = context.getString(R.string.gems_left_max, gemsLeft, maxGems)
             } else {
@@ -176,14 +177,16 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
             priceLabel.cantAfford = true
         }
 
-        checkGearClass()
+        if (shopItem.isTypeGear) {
+            checkGearClass()
+        }
     }
 
     override fun dismiss() {
         userRepository.close()
         inventoryRepository.close()
-        if (!compositeSubscription.isUnsubscribed) {
-            compositeSubscription.unsubscribe()
+        if (!compositeSubscription.isDisposed) {
+            compositeSubscription.dispose()
         }
         super.dismiss()
     }
@@ -193,7 +196,7 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
             if (window != null) {
                 val height = scrollView.getChildAt(0).height
                 val displayMetrics = DisplayMetrics()
-                window.windowManager.defaultDisplay.getMetrics(displayMetrics)
+                window?.windowManager?.defaultDisplay?.getMetrics(displayMetrics)
                 val screenHeight = displayMetrics.heightPixels
                 val spaceRequired = (displayMetrics.density * 160).toInt()
 
@@ -215,7 +218,7 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
             }
             val gemsLeft = if (shopItem.limitedNumberLeft != null) shopItem.limitedNumberLeft else 0
             if ((gemsLeft == 0 && shopItem.purchaseType == "gems") || shopItem.canAfford(user)) {
-                val observable: Observable<Void>
+                val observable: Flowable<Any>
                 if (shopIdentifier != null && shopIdentifier == Shop.TIME_TRAVELERS_SHOP || "mystery_set" == shopItem.purchaseType) {
                     observable = if (shopItem.purchaseType == "gear") {
                         inventoryRepository.purchaseMysterySet(shopItem.categoryIdentifier)
@@ -225,7 +228,7 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
                 } else if (shopItem.purchaseType == "quests" && shopItem.currency == "gold") {
                     observable = inventoryRepository.purchaseQuest(shopItem.key)
                 } else if ("gold" == shopItem.currency && "gem" != shopItem.key) {
-                    observable = inventoryRepository.buyItem(user, shopItem.key, shopItem.value.toDouble()).flatMap { buyResponse ->
+                    observable = inventoryRepository.buyItem(user, shopItem.key, shopItem.value.toDouble()).map { buyResponse ->
                         if (shopItem.key == "armoire") {
                             snackbarText[0] = when {
                                 buyResponse.armoire["type"] == "gear" -> context.getString(R.string.armoireEquipment, buyResponse.armoire["dropText"])
@@ -233,7 +236,7 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
                                 else -> context.getString(R.string.armoireExp)
                             }
                         }
-                        Observable.just<Void>(null)
+                        buyResponse
                     }
                 } else {
                     observable = inventoryRepository.purchaseItem(shopItem.purchaseType, shopItem.key)
@@ -241,9 +244,11 @@ class PurchaseDialog(context: Context, component: AppComponent, val item: ShopIt
                 observable
                         .doOnNext {
                             val event = ShowSnackbarEvent()
-                            event.title = context.getString(R.string.successful_purchase, shopItem.text)
                             if (snackbarText[0].isNotEmpty()) {
+                                event.title = context.getString(R.string.successful_purchase, shopItem.text)
                                 event.text = snackbarText[0]
+                            } else {
+                                event.text = context.getString(R.string.successful_purchase, shopItem.text)
                             }
                             event.type = HabiticaSnackbar.SnackbarDisplayType.NORMAL
                             event.rightIcon = priceLabel.compoundDrawables[0]

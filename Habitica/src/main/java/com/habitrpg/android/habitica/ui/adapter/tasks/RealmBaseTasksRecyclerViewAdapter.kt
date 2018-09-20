@@ -7,6 +7,11 @@ import android.view.ViewGroup
 import com.habitrpg.android.habitica.helpers.TaskFilterHelper
 import com.habitrpg.android.habitica.models.tasks.Task
 import com.habitrpg.android.habitica.ui.viewHolders.tasks.BaseTaskViewHolder
+import io.reactivex.BackpressureStrategy
+import io.reactivex.Flowable
+import io.reactivex.Observable
+import io.reactivex.functions.Action
+import io.reactivex.subjects.PublishSubject
 import io.realm.OrderedRealmCollection
 import io.realm.OrderedRealmCollectionChangeListener
 import io.realm.RealmList
@@ -45,6 +50,8 @@ abstract class RealmBaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(privat
     var data: OrderedRealmCollection<Task>? = null
         private set
 
+    private var errorButtonEventsSubject = PublishSubject.create<String>()
+
     private val isDataValid: Boolean
         get() = data?.isValid ?: false
 
@@ -57,14 +64,14 @@ abstract class RealmBaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(privat
         filter()
     }
 
-    override fun onAttachedToRecyclerView(recyclerView: RecyclerView?) {
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
         if (hasAutoUpdates && isDataValid) {
             addListener(data)
         }
     }
 
-    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView?) {
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
         super.onDetachedFromRecyclerView(recyclerView)
         if (hasAutoUpdates && isDataValid) {
 
@@ -74,17 +81,15 @@ abstract class RealmBaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(privat
 
     override fun getItemId(index: Int): Long = index.toLong()
 
-    override fun getItemCount(): Int = if (isDataValid) data!!.size else 0
+    override fun getItemCount(): Int = if (isDataValid) data?.size ?: 0 else 0
 
-    fun getItem(index: Int): Task? = if (isDataValid) data!![index] else null
-
-
+    fun getItem(index: Int): Task? = if (isDataValid) data?.get(index) else null
 
     override fun updateData(data: OrderedRealmCollection<Task>?) {
         if (hasAutoUpdates) {
             if (isDataValid) {
 
-                removeListener(this.data!!)
+                removeListener(this.data)
             }
             if (data != null) {
                 addListener(data)
@@ -132,6 +137,9 @@ abstract class RealmBaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(privat
         val item = getItem(position)
         if (item != null) {
             holder.bindHolder(item, position)
+            holder.errorButtonClicked = Action {
+                errorButtonEventsSubject.onNext("")
+            }
         }
     }
 
@@ -141,13 +149,11 @@ abstract class RealmBaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(privat
             LayoutInflater.from(parent.context).inflate(layoutResource, parent, false)
 
     final override fun filter() {
-        if (unfilteredData == null) {
-            return
-        }
+        val unfilteredData = this.unfilteredData ?: return
 
         if (taskFilterHelper != null) {
             val query = taskFilterHelper.createQuery(unfilteredData)
-            updateData(query.findAllSorted("position"))
+            updateData(query.sort("position").findAll())
         }
     }
 
@@ -155,5 +161,13 @@ abstract class RealmBaseTasksRecyclerViewAdapter<VH : BaseTaskViewHolder>(privat
 
     override fun setIgnoreUpdates(ignoreUpdates: Boolean) {
         this.ignoreUpdates = ignoreUpdates
+    }
+
+    override fun getTaskIDAt(position: Int): String {
+        return data?.get(position)?.id ?: ""
+    }
+
+    override fun getErrorButtonEvents(): Flowable<String> {
+        return errorButtonEventsSubject.toFlowable(BackpressureStrategy.DROP)
     }
 }

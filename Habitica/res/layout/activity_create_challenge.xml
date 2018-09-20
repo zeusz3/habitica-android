@@ -8,7 +8,7 @@
     android:orientation="vertical"
     android:paddingBottom="@dimen/activity_vertical_margin"
 
-    tools:context="com.habitrpg.android.habitica.ui.activities.CreateChallengeActivity">
+    tools:context="com.habitrpg.android.habitica.ui.activities.ChallengeFormActivity">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -42,7 +42,8 @@
                     android:textColorHighlight="@color/brand_500"
                     android:textColorHint="@color/brand_500"
 
-                    tools:text="Get in shape" />
+                    tools:text="Get in shape"
+                    android:inputType="text" />
             </android.support.design.widget.TextInputLayout>
 
             <android.support.design.widget.TextInputLayout
@@ -80,6 +81,11 @@
             android:orientation="vertical"
             android:paddingLeft="@dimen/activity_horizontal_margin"
             android:paddingRight="@dimen/activity_horizontal_margin">
+            <LinearLayout
+                android:id="@+id/challenge_creation_views"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
             <TextView
                 style="@style/Subheader2"
@@ -166,7 +172,7 @@
                 android:drawableRight="@drawable/ic_info_outline_black_24dp"
                 android:drawableTint="@color/brand_300"
                 android:gravity="center"
-                android:text="Tag"
+                android:text="@string/short_name"
                 android:textColor="#cc000000" />
 
             <android.support.design.widget.TextInputLayout
@@ -183,10 +189,11 @@
 
                     android:hint="@string/identify_your_challenge_with_a_tag"
                     android:maxLines="1"
-                    android:textColor="@color/white"
+                    android:textColor="@color/gray_100"
                     android:textColorHint="#61000000" />
             </android.support.design.widget.TextInputLayout>
 
+            </LinearLayout>
             <TextView
                 style="@style/Subheader2"
                 android:layout_width="match_parent"

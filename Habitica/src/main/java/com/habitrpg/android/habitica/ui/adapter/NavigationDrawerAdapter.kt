@@ -1,22 +1,19 @@
 package com.habitrpg.android.habitica.ui.adapter
 
-import android.content.Context
-import android.graphics.PorterDuff
 import android.support.v4.content.ContextCompat
+import android.support.v4.graphics.drawable.DrawableCompat
 import android.support.v7.widget.RecyclerView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import com.habitrpg.android.habitica.R
-import com.habitrpg.android.habitica.extensions.bindOptionalView
-import com.habitrpg.android.habitica.extensions.inflate
-import com.habitrpg.android.habitica.ui.menu.HabiticaDrawerItem
-import rx.Observable
-import rx.subjects.PublishSubject
-import android.support.v4.graphics.drawable.DrawableCompat.setTint
-import android.graphics.drawable.Drawable
-import android.support.v4.graphics.drawable.DrawableCompat
 import com.habitrpg.android.habitica.extensions.backgroundCompat
+import com.habitrpg.android.habitica.extensions.inflate
+import com.habitrpg.android.habitica.ui.helpers.bindOptionalView
+import com.habitrpg.android.habitica.ui.menu.HabiticaDrawerItem
+import io.reactivex.BackpressureStrategy
+import io.reactivex.Flowable
+import io.reactivex.subjects.PublishSubject
 
 
 class NavigationDrawerAdapter(tintColor: Int, backgroundTintColor: Int): RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -44,12 +41,12 @@ class NavigationDrawerAdapter(tintColor: Int, backgroundTintColor: Int): Recycle
     private val itemSelectedEvents = PublishSubject.create<String>()
 
 
-    fun getItemSelectionEvents(): Observable<String> = itemSelectedEvents.asObservable()
+    fun getItemSelectionEvents(): Flowable<String> = itemSelectedEvents.toFlowable(BackpressureStrategy.DROP)
 
     fun getItemWithIdentifier(identifier: String): HabiticaDrawerItem? =
             items.find { it.identifier == identifier }
 
-    fun getItemPosition(identifier: String): Int =
+    private fun getItemPosition(identifier: String): Int =
             items.indexOfFirst { it.identifier == identifier }
 
     fun updateItem(item: HabiticaDrawerItem) {
@@ -64,16 +61,16 @@ class NavigationDrawerAdapter(tintColor: Int, backgroundTintColor: Int): Recycle
         notifyDataSetChanged()
     }
 
-    override fun onBindViewHolder(holder: RecyclerView.ViewHolder?, position: Int) {
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val drawerItem = getItem(position)
         if (getItemViewType(position) == 0) {
             (holder as DrawerItemViewHolder?)?.tintColor = tintColor
-            holder?.backgroundTintColor = backgroundTintColor
-            holder?.bind(drawerItem, drawerItem.identifier == selectedItem)
-            holder?.itemView?.setOnClickListener { itemSelectedEvents.onNext(drawerItem.identifier) }
+            holder.backgroundTintColor = backgroundTintColor
+            holder.bind(drawerItem, drawerItem.identifier == selectedItem)
+            holder.itemView?.setOnClickListener { itemSelectedEvents.onNext(drawerItem.identifier) }
         } else {
             (holder as SectionHeaderViewHolder?)?.backgroundTintColor = backgroundTintColor
-            holder?.bind(drawerItem)
+            holder.bind(drawerItem)
         }
     }
 
@@ -83,11 +80,11 @@ class NavigationDrawerAdapter(tintColor: Int, backgroundTintColor: Int): Recycle
 
     override fun getItemViewType(position: Int): Int = if (getItem(position).isHeader) 1 else 0
 
-    override fun onCreateViewHolder(parent: ViewGroup?, viewType: Int): RecyclerView.ViewHolder {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         return if (viewType == 0) {
-            DrawerItemViewHolder(parent?.inflate(R.layout.drawer_main_item))
+            DrawerItemViewHolder(parent.inflate(R.layout.drawer_main_item))
         } else {
-            SectionHeaderViewHolder(parent?.inflate(R.layout.drawer_main_section_header))
+            SectionHeaderViewHolder(parent.inflate(R.layout.drawer_main_section_header))
         }
     }
 

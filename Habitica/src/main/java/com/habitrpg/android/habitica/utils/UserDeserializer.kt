@@ -9,7 +9,7 @@ import com.habitrpg.android.habitica.models.PushDevice
 import com.habitrpg.android.habitica.models.Tag
 import com.habitrpg.android.habitica.models.inventory.Quest
 import com.habitrpg.android.habitica.models.invitations.Invitations
-import com.habitrpg.android.habitica.models.social.Challenge
+import com.habitrpg.android.habitica.models.social.ChallengeMembership
 import com.habitrpg.android.habitica.models.social.UserParty
 import com.habitrpg.android.habitica.models.tasks.TasksOrder
 import com.habitrpg.android.habitica.models.user.*
@@ -36,9 +36,6 @@ class UserDeserializer : JsonDeserializer<User> {
         }
         if (obj.has("inbox")) {
             user.inbox = context.deserialize(obj.get("inbox"), Inbox::class.java)
-            for (message in user.inbox.messages) {
-                message.isInboxMessage = true
-            }
         }
         if (obj.has("preferences")) {
             user.preferences = context.deserialize(obj.get("preferences"), Preferences::class.java)
@@ -48,13 +45,13 @@ class UserDeserializer : JsonDeserializer<User> {
         }
         if (obj.has("party")) {
             user.party = context.deserialize(obj.get("party"), UserParty::class.java)
-            if (user.party != null && user.party.quest != null) {
-                user.party.quest.id = user.id
+            if (user.party != null && user.party?.quest != null) {
+                user.party?.quest?.id = user.id
                 if (!obj.getAsJsonObject("party").getAsJsonObject("quest").has("RSVPNeeded")) {
                     val realm = Realm.getDefaultInstance()
                     val quest = realm.where(Quest::class.java).equalTo("id", user.id).findFirst()
                     if (quest != null && quest.isValid) {
-                        user.party.quest.RSVPNeeded = quest.RSVPNeeded
+                        user.party?.quest?.RSVPNeeded = quest.RSVPNeeded
                     }
                 }
             }
@@ -87,13 +84,16 @@ class UserDeserializer : JsonDeserializer<User> {
             user.tasksOrder = context.deserialize(obj.get("tasksOrder"), TasksOrder::class.java)
         }
         if (obj.has("challenges")) {
-            user.challenges = context.deserialize(obj.get("challenges"), object : TypeToken<RealmList<Challenge>>() {}.type)
+            user.challenges = RealmList()
+            obj.getAsJsonArray("challenges").forEach {
+                user.challenges?.add(ChallengeMembership(user.id ?: "", it.asString))
+            }
         }
         if (obj.has("purchased")) {
             user.purchased = context.deserialize(obj.get("purchased"), Purchases::class.java)
             if (obj.getAsJsonObject("purchased").has("plan")) {
                 if (obj.getAsJsonObject("purchased").getAsJsonObject("plan").has("mysteryItems")) {
-                    user.purchased.plan.mysteryItemCount = obj.getAsJsonObject("purchased").getAsJsonObject("plan").getAsJsonArray("mysteryItems").size()
+                    user.purchased?.plan?.mysteryItemCount = obj.getAsJsonObject("purchased").getAsJsonObject("plan").getAsJsonArray("mysteryItems").size()
                 }
             }
         }
@@ -102,7 +102,7 @@ class UserDeserializer : JsonDeserializer<User> {
             user.pushDevices = ArrayList()
             obj.getAsJsonArray("pushDevices")
                     .map { context.deserialize<PushDevice>(it, PushDevice::class.java) }
-                    .forEach { user.pushDevices.add(it) }
+                    .forEach { (user.pushDevices as? ArrayList<PushDevice>)?.add(it) }
         }
 
         if (obj.has("lastCron")) {
@@ -120,6 +120,16 @@ class UserDeserializer : JsonDeserializer<User> {
                 } catch (ignored: UnsupportedOperationException) {
                 }
 
+            }
+        }
+
+        if (obj.has("_ABTests")) {
+            user.abTests = RealmList()
+            for (testJSON in obj.getAsJsonObject("_ABTests").entrySet()) {
+                val test = ABTest()
+                test.name = testJSON.key
+                test.group = testJSON.value.asString
+                user.abTests?.add(test)
             }
         }
 

@@ -6,12 +6,7 @@ import android.os.Bundle
 import android.support.v4.app.Fragment
 import android.support.v4.app.FragmentPagerAdapter
 import android.support.v4.view.ViewPager
-import android.view.LayoutInflater
-import android.view.Menu
-import android.view.MenuInflater
-import android.view.MenuItem
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
 import com.github.clans.fab.FloatingActionButton
 import com.github.clans.fab.FloatingActionMenu
 import com.habitrpg.android.habitica.HabiticaBaseApplication
@@ -20,14 +15,15 @@ import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.data.TagRepository
 import com.habitrpg.android.habitica.events.TaskTappedEvent
 import com.habitrpg.android.habitica.events.commands.AddNewTaskCommand
+import com.habitrpg.android.habitica.extensions.notNull
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.helpers.TaskFilterHelper
 import com.habitrpg.android.habitica.models.tasks.Task
 import com.habitrpg.android.habitica.ui.activities.TaskFormActivity
 import com.habitrpg.android.habitica.ui.fragments.BaseMainFragment
 import com.habitrpg.android.habitica.ui.views.tasks.TaskFilterDialog
+import io.reactivex.functions.Consumer
 import org.greenrobot.eventbus.Subscribe
-import rx.functions.Action1
 import java.util.*
 import javax.inject.Inject
 
@@ -39,8 +35,8 @@ class TasksFragment : BaseMainFragment() {
     @Inject
     lateinit var tagRepository: TagRepository
 
-    internal var refreshItem: MenuItem? = null
-    internal var floatingMenu: FloatingActionMenu? = null
+    private var refreshItem: MenuItem? = null
+    private var floatingMenu: FloatingActionMenu? = null
     internal var viewFragmentsDictionary: MutableMap<Int, TaskRecyclerViewFragment>? = WeakHashMap()
 
     private var displayingTaskForm: Boolean = false
@@ -75,7 +71,7 @@ class TasksFragment : BaseMainFragment() {
         todoFab?.setOnClickListener { openNewTaskActivity(Task.TYPE_TODO) }
         val rewardFab = floatingMenu?.findViewById<FloatingActionButton>(R.id.fab_new_reward)
         rewardFab?.setOnClickListener { openNewTaskActivity(Task.TYPE_REWARD) }
-        floatingMenu?.setOnMenuButtonLongClickListener { this.onFloatingMenuLongClicked(it) }
+        floatingMenu?.setOnMenuButtonLongClickListener { this.onFloatingMenuLongClicked() }
 
         loadTaskLists()
 
@@ -99,7 +95,7 @@ class TasksFragment : BaseMainFragment() {
         super.onDestroy()
     }
 
-    private fun onFloatingMenuLongClicked(view: View): Boolean {
+    private fun onFloatingMenuLongClicked(): Boolean {
         val currentFragment = activeFragment
         if (currentFragment != null) {
             val className = currentFragment.className
@@ -138,33 +134,37 @@ class TasksFragment : BaseMainFragment() {
     }
 
     private fun showFilterDialog() {
-        val dialog = TaskFilterDialog(context, HabiticaBaseApplication.getComponent())
-        if (user != null) {
-            dialog.setTags(user?.tags?.createSnapshot())
-        }
-        dialog.setActiveTags(taskFilterHelper.tags)
-        if (activeFragment != null) {
-            val taskType = activeFragment?.classType
-            if (taskType != null) {
-                dialog.setTaskType(taskType, taskFilterHelper.getActiveFilter(taskType))
+        context.notNull {
+            val dialog = TaskFilterDialog(it, HabiticaBaseApplication.component)
+            if (user != null) {
+                dialog.setTags(user?.tags?.createSnapshot() ?: emptyList())
             }
-        }
-        dialog.setListener { activeTaskFilter, activeTags ->
-            if (viewFragmentsDictionary == null) {
-                return@setListener
+            dialog.setActiveTags(taskFilterHelper.tags)
+            if (activeFragment != null) {
+                val taskType = activeFragment?.classType
+                if (taskType != null) {
+                    dialog.setTaskType(taskType, taskFilterHelper.getActiveFilter(taskType))
+                }
             }
-            val activePos = viewPager?.currentItem ?: 0
-            viewFragmentsDictionary?.get(activePos - 1)?.recyclerAdapter?.filter()
-            viewFragmentsDictionary?.get(activePos + 1)?.recyclerAdapter?.filter()
-            taskFilterHelper.tags = activeTags
-            if (activeTaskFilter != null) {
-                activeFragment?.setActiveFilter(activeTaskFilter)
-            }
-            viewFragmentsDictionary?.values?.forEach { it.recyclerAdapter?.filter() }
-            updateFilterIcon()
+            dialog.setListener(object : TaskFilterDialog.OnFilterCompletedListener {
 
+                override fun onFilterCompleted(activeTaskFilter: String?, activeTags: MutableList<String>) {
+                    if (viewFragmentsDictionary == null) {
+                        return
+                    }
+                    val activePos = viewPager?.currentItem ?: 0
+                    viewFragmentsDictionary?.get(activePos - 1)?.recyclerAdapter?.filter()
+                    viewFragmentsDictionary?.get(activePos + 1)?.recyclerAdapter?.filter()
+                    taskFilterHelper.tags = activeTags
+                    if (activeTaskFilter != null) {
+                        activeFragment?.setActiveFilter(activeTaskFilter)
+                    }
+                    viewFragmentsDictionary?.values?.forEach { it.recyclerAdapter?.filter() }
+                    updateFilterIcon()
+                }
+            })
+            dialog.show()
         }
-        dialog.show()
     }
 
     private fun refresh() {
@@ -235,7 +235,7 @@ class TasksFragment : BaseMainFragment() {
         if (bottomNavigation == null) {
             return
         }
-        tutorialRepository.getTutorialSteps(Arrays.asList("habits", "dailies", "todos", "rewards")).subscribe(Action1 { tutorialSteps ->
+        tutorialRepository.getTutorialSteps(Arrays.asList("habits", "dailies", "todos", "rewards")).subscribe(Consumer { tutorialSteps ->
             val activeTutorialFragments = ArrayList<String>()
             for (step in tutorialSteps) {
                 var id = -1
@@ -290,6 +290,7 @@ class TasksFragment : BaseMainFragment() {
         bundle.putString(TaskFormActivity.TASK_TYPE_KEY, type)
         bundle.putString(TaskFormActivity.USER_ID_KEY, if (this.user != null) this.user?.id else null)
         bundle.putBoolean(TaskFormActivity.ALLOCATION_MODE_KEY, allocationMode)
+        bundle.putBoolean(TaskFormActivity.SAVE_TO_DB, true)
 
         val intent = Intent(activity, TaskFormActivity::class.java)
         intent.putExtras(bundle)
@@ -313,6 +314,7 @@ class TasksFragment : BaseMainFragment() {
         bundle.putString(TaskFormActivity.TASK_ID_KEY, event.Task.id)
         bundle.putString(TaskFormActivity.USER_ID_KEY, if (this.user != null) this.user?.id else null)
         bundle.putBoolean(TaskFormActivity.ALLOCATION_MODE_KEY, allocationMode)
+        bundle.putBoolean(TaskFormActivity.SAVE_TO_DB, true)
 
         val intent = Intent(activity, TaskFormActivity::class.java)
         intent.putExtras(bundle)
@@ -328,10 +330,6 @@ class TasksFragment : BaseMainFragment() {
     }
 
     //endregion Events
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-    }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -378,12 +376,12 @@ class TasksFragment : BaseMainFragment() {
     override val displayedClassName: String?
         get() = null
 
-    override fun customTitle(): String? = null
+    override fun customTitle(): String = ""
 
     override fun addToBackStack(): Boolean = false
 
     companion object {
-        private val TASK_CREATED_RESULT = 1
-        private val TASK_UPDATED_RESULT = 2
+        private const val TASK_CREATED_RESULT = 1
+        private const val TASK_UPDATED_RESULT = 2
     }
 }

@@ -18,6 +18,8 @@ import com.habitrpg.android.habitica.helpers.RxErrorHandler;
 import com.habitrpg.android.habitica.modules.AppModule;
 import com.habitrpg.android.habitica.ui.activities.MainActivity;
 
+import java.util.Objects;
+
 import javax.inject.Inject;
 import javax.inject.Named;
 
@@ -35,7 +37,7 @@ public abstract class TaskListWidgetProvider extends BaseWidgetProvider {
 
     private void setUp(Context context) {
         if (apiClient == null) {
-            HabiticaBaseApplication.getComponent().inject(this);
+            Objects.requireNonNull(HabiticaBaseApplication.Companion.getComponent()).inject(this);
         }
     }
 
@@ -55,11 +57,12 @@ public abstract class TaskListWidgetProvider extends BaseWidgetProvider {
             String taskId = intent.getStringExtra(TASK_ID_ITEM);
 
             if (taskId != null) {
-                userRepository.getUser(userId).first().flatMap(user -> taskRepository.taskChecked(user, taskId, true, false))
+                getUserRepository().getUser(userId).firstElement().flatMap(user -> taskRepository.taskChecked(user, taskId, true, false))
                         .subscribe(taskDirectionData -> {
                             taskRepository.markTaskCompleted(taskId, true);
                             showToastForTaskDirection(context, taskDirectionData, userId);
-                        }, RxErrorHandler.handleEmptyError(), () -> AppWidgetManager.getInstance(context).notifyAppWidgetViewDataChanged(appWidgetId, R.id.list_view));
+                            AppWidgetManager.getInstance(context).notifyAppWidgetViewDataChanged(appWidgetId, R.id.list_view);
+                        }, RxErrorHandler.handleEmptyError());
             }
         }
         super.onReceive(context, intent);
@@ -67,6 +70,7 @@ public abstract class TaskListWidgetProvider extends BaseWidgetProvider {
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
+        super.onUpdate(context, appWidgetManager, appWidgetIds);
         setUp(context);
         ComponentName thisWidget = new ComponentName(context, getProviderClass());
         int[] allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);

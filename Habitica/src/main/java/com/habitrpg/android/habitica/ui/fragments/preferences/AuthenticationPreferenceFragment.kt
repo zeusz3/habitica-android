@@ -22,8 +22,8 @@ import com.habitrpg.android.habitica.extensions.notNull
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.user.User
 import com.habitrpg.android.habitica.ui.views.subscriptions.SubscriptionDetailsView
+import io.reactivex.functions.Consumer
 import org.greenrobot.eventbus.EventBus
-import rx.functions.Action1
 
 class AuthenticationPreferenceFragment: BasePreferencesFragment() {
 
@@ -35,7 +35,7 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        HabiticaBaseApplication.getComponent().inject(this)
+        HabiticaBaseApplication.component?.inject(this)
         super.onCreate(savedInstanceState)
     }
 
@@ -58,20 +58,18 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
             "email" -> showEmailDialog()
             "change_password" -> showChangePasswordDialog()
             "subscription_status" -> {
-                if (user != null && user!!.purchased != null && user!!.purchased.plan != null) {
-                    val plan = user!!.purchased.plan
-                    if (plan.isActive) {
-                        showSubscriptionStatusDialog()
-                        return super.onPreferenceTreeClick(preference)
-                    }
+                val plan = user?.purchased?.plan
+                if (plan?.isActive == true) {
+                    showSubscriptionStatusDialog()
+                    return super.onPreferenceTreeClick(preference)
                 }
                 EventBus.getDefault().post(OpenGemPurchaseFragmentCommand())
             }
             "reset_account" -> showAccountResetConfirmation()
             "delete_account" -> showAccountDeleteConfirmation()
             else -> {
-                val clipMan = activity?.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipMan.primaryClip = ClipData.newPlainText(preference.key, preference.summary)
+                val clipMan = activity?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                clipMan?.primaryClip = ClipData.newPlainText(preference.key, preference.summary)
                 Toast.makeText(activity, "Copied " + preference.key + " to clipboard.", Toast.LENGTH_SHORT).show()
             }
         }
@@ -94,7 +92,7 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
                     .setPositiveButton(R.string.change) { thisDialog, _ ->
                         thisDialog.dismiss()
                         userRepository.updateEmail(emailEditText?.text.toString(), passwordEditText?.text.toString())
-                                .subscribe(Action1 {
+                                .subscribe(Consumer {
                                     configurePreference(findPreference("email"), emailEditText?.text.toString())
                                 }, RxErrorHandler.handleEmptyError())
                     }
@@ -118,7 +116,7 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
                     .setPositiveButton(R.string.change) { thisDialog, _ ->
                         thisDialog.dismiss()
                         userRepository.updateLoginName(loginNameEditText?.text.toString(), passwordEditText?.text.toString())
-                                .subscribe(Action1 {
+                                .subscribe(Consumer {
                                     configurePreference(findPreference("login_name"), loginNameEditText?.text.toString())
                                 }, RxErrorHandler.handleEmptyError())
                     }
@@ -153,9 +151,10 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
     }
 
     private fun deleteAccount(password: String) {
+        @Suppress("DEPRECATION")
         val dialog = ProgressDialog.show(context, context?.getString(R.string.deleting_account), null, true)
         userRepository.deleteAccount(password).subscribe({ _ ->
-            HabiticaApplication.logout(context)
+            context.notNull { HabiticaBaseApplication.logout(it) }
             activity?.finish()
         }) { throwable ->
             dialog.dismiss()
@@ -180,6 +179,7 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
     }
 
     private fun resetAccount() {
+        @Suppress("DEPRECATION")
         val dialog = ProgressDialog.show(context, context?.getString(R.string.resetting_account), null, true)
         userRepository.resetAccount().subscribe({ _ -> dialog.dismiss() }) { throwable ->
             dialog.dismiss()
@@ -188,9 +188,11 @@ class AuthenticationPreferenceFragment: BasePreferencesFragment() {
     }
 
     private fun showSubscriptionStatusDialog() {
-        val view = SubscriptionDetailsView(context)
-        view.setPlan(user?.purchased?.plan)
         context.notNull { context ->
+            val view = SubscriptionDetailsView(context)
+            user?.purchased?.plan?.notNull {
+                view.setPlan(it)
+            }
             val dialog = AlertDialog.Builder(context)
                     .setView(view)
                     .setTitle(R.string.subscription_status)

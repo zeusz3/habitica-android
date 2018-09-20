@@ -26,8 +26,6 @@ open class Group : RealmObject() {
 
     var memberCount: Int = 0
 
-    var isMember: Boolean = false
-
     var type: String? = null
 
     var logo: String? = null
@@ -35,8 +33,6 @@ open class Group : RealmObject() {
     var quest: Quest? = null
 
     var privacy: String? = null
-
-    var chat: RealmList<ChatMessage>? = null
 
     var members: RealmList<User>? = null
 

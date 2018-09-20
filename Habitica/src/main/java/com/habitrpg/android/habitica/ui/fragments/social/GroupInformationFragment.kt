@@ -1,5 +1,10 @@
 package com.habitrpg.android.habitica.ui.fragments.social
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -14,17 +19,13 @@ import com.habitrpg.android.habitica.models.invitations.PartyInvite
 import com.habitrpg.android.habitica.models.members.Member
 import com.habitrpg.android.habitica.models.social.Group
 import com.habitrpg.android.habitica.models.user.User
-import com.habitrpg.android.habitica.ui.fragments.BaseFragment
-import kotlinx.android.synthetic.main.fragment_group_info.*
-import rx.functions.Action1
-import javax.inject.Inject
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import com.habitrpg.android.habitica.ui.activities.MainActivity
+import com.habitrpg.android.habitica.ui.fragments.BaseFragment
+import com.habitrpg.android.habitica.ui.helpers.MarkdownParser
 import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar
-import android.content.Intent
-import android.net.Uri
+import io.reactivex.functions.Consumer
+import kotlinx.android.synthetic.main.fragment_group_info.*
+import javax.inject.Inject
 
 
 class GroupInformationFragment : BaseFragment() {
@@ -34,7 +35,11 @@ class GroupInformationFragment : BaseFragment() {
     @Inject
     lateinit var userRepository: UserRepository
 
-    private var group: Group? = null
+    var group: Group? = null
+    set(value) {
+        field = value
+        updateGroup(value)
+    }
     private var user: User? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? =
@@ -43,25 +48,26 @@ class GroupInformationFragment : BaseFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+
+        refreshLayout?.setOnRefreshListener { this.refresh() }
+
         if (user != null) {
             setUser(user)
         } else {
-            compositeSubscription.add(userRepository.getUser().subscribe(Action1 {
+            compositeSubscription.add(userRepository.getUser().subscribe(Consumer {
                 user = it
                 setUser(user)
             }, RxErrorHandler.handleEmptyError()))
         }
 
-        if (group != null) {
-            setGroup(group)
-        }
+        updateGroup(group)
 
         if (this.group == null) {
             val qrCodeManager = QrCodeManager(userRepository, this.context)
             qrCodeManager.setUpView(qrLayout)
         }
 
-        buttonPartyInviteAccept.setOnClickListener({
+        buttonPartyInviteAccept.setOnClickListener { _ ->
             val userId = user?.invitations?.party?.id
             if (userId != null) {
                 socialRepository.joinGroup(userId)
@@ -69,25 +75,25 @@ class GroupInformationFragment : BaseFragment() {
                         .flatMap { userRepository.retrieveUser(false) }
                         .flatMap { socialRepository.retrieveGroup("party") }
                         .flatMap<List<Member>> { group1 -> socialRepository.retrieveGroupMembers(group1.id, true) }
-                        .subscribe(Action1 {  }, RxErrorHandler.handleEmptyError())
+                        .subscribe(Consumer {  }, RxErrorHandler.handleEmptyError())
             }
-        })
+        }
 
-        buttonPartyInviteReject.setOnClickListener({
+        buttonPartyInviteReject.setOnClickListener { _ ->
             val userId = user?.invitations?.party?.id
             if (userId != null) {
                 socialRepository.rejectGroupInvite(userId)
-                        .subscribe(Action1 { setInvitation(null) }, RxErrorHandler.handleEmptyError())
+                        .subscribe(Consumer { setInvitation(null) }, RxErrorHandler.handleEmptyError())
             }
-        })
+        }
 
-        userIdView.setOnClickListener {
-            val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        userIdView.setOnClickListener { _ ->
+            val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = ClipData.newPlainText(context?.getString(R.string.user_id), user?.id)
-            clipboard.primaryClip = clip
-            val activity = activity as MainActivity?
+            clipboard?.primaryClip = clip
+            val activity = activity as? MainActivity
             if (activity != null) {
-                HabiticaSnackbar.showSnackbar(activity.getFloatingMenuWrapper(), getString(R.string.id_copied), HabiticaSnackbar.SnackbarDisplayType.NORMAL)
+                HabiticaSnackbar.showSnackbar(activity.floatingMenuWrapper, getString(R.string.id_copied), HabiticaSnackbar.SnackbarDisplayType.NORMAL)
             }
         }
 
@@ -97,9 +103,22 @@ class GroupInformationFragment : BaseFragment() {
         }
     }
 
+    private fun refresh() {
+        if (group != null) {
+            socialRepository.retrieveGroup(group?.id ?: "").subscribe(Consumer {}, RxErrorHandler.handleEmptyError())
+        } else {
+            userRepository.retrieveUser(false, forced = true)
+                    .filter { it.hasParty() }
+                    .flatMap { socialRepository.retrieveGroup("party") }
+                    .flatMap<List<Member>> { group1 -> socialRepository.retrieveGroupMembers(group1.id, true) }
+                    .doOnComplete { refreshLayout.isRefreshing = false }
+                    .subscribe(Consumer {  }, RxErrorHandler.handleEmptyError())
+        }
+    }
+
     private fun setUser(user: User?) {
-        if (group == null && user != null && user.invitations != null && user.invitations.party.id != null) {
-            setInvitation(user.invitations.party)
+        if (group == null && user?.invitations?.party?.id != null) {
+            setInvitation(user.invitations?.party)
         } else {
             setInvitation(null)
         }
@@ -120,9 +139,7 @@ class GroupInformationFragment : BaseFragment() {
         component.inject(this)
     }
 
-    fun setGroup(group: Group?) {
-        this.group = group
-
+    private fun updateGroup(group: Group?) {
         if (noPartyWrapper == null) {
             return
         }
@@ -134,7 +151,7 @@ class GroupInformationFragment : BaseFragment() {
         groupDescriptionView.visibility = groupItemVisibility
         groupDescriptionWrapper.visibility = groupItemVisibility
 
-        groupDescriptionView.text = group?.description
+        groupDescriptionView.text = MarkdownParser.parseMarkdown(group?.description)
         leadernameWrapper.visibility = if (group?.leaderName != null) View.VISIBLE else View.GONE
         leadernameTextView.text = group?.leaderName
         leaderMessageWrapper.visibility = if (group?.leaderMessage != null) View.VISIBLE else View.GONE

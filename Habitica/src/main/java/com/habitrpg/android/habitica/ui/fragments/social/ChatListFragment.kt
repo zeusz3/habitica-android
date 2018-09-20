@@ -9,13 +9,17 @@ import android.os.Bundle
 import android.support.v4.widget.SwipeRefreshLayout
 import android.support.v7.app.AlertDialog
 import android.support.v7.widget.LinearLayoutManager
+import android.support.v7.widget.RecyclerView
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import com.habitrpg.android.habitica.R
 import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.data.SocialRepository
 import com.habitrpg.android.habitica.data.UserRepository
+import com.habitrpg.android.habitica.extensions.notNull
+import com.habitrpg.android.habitica.helpers.RemoteConfigManager
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.social.ChatMessage
 import com.habitrpg.android.habitica.models.user.User
@@ -24,31 +28,38 @@ import com.habitrpg.android.habitica.ui.activities.MainActivity
 import com.habitrpg.android.habitica.ui.adapter.social.ChatRecyclerViewAdapter
 import com.habitrpg.android.habitica.ui.fragments.BaseFragment
 import com.habitrpg.android.habitica.ui.helpers.SafeDefaultItemAnimator
-import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar
-import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar.SnackbarDisplayType
 import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar.Companion.showSnackbar
+import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar.SnackbarDisplayType
+import io.reactivex.Flowable
+import io.reactivex.Observable
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.Disposable
+import io.reactivex.functions.Consumer
 import io.realm.RealmResults
 import kotlinx.android.synthetic.main.fragment_chat.*
 import kotlinx.android.synthetic.main.tavern_chat_new_entry_item.*
-import rx.functions.Action0
-import rx.functions.Action1
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
 
-    var seenGroupId: String = ""
     @Inject
     lateinit var socialRepository: SocialRepository
     @Inject
     lateinit var userRepository: UserRepository
+    @Inject
+    lateinit var configManager: RemoteConfigManager
+
     private var isTavern: Boolean = false
     internal var layoutManager: LinearLayoutManager? = null
-    private var groupId: String = ""
+    internal var groupId: String? = null
     private var user: User? = null
     private var userId: String? = null
     private var chatAdapter: ChatRecyclerViewAdapter? = null
     private var navigatedOnceToFragment = false
     private var gotNewMessages = false
+    private var isScrolledToTop = true
+    private var refreshDisposable: Disposable? = null
 
     fun configure(groupId: String, user: User?, isTavern: Boolean) {
         this.groupId = groupId
@@ -73,7 +84,7 @@ class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
             if (savedInstanceState.containsKey("userId")) {
                 this.userId = savedInstanceState.getString("userId")
                 if (this.userId != null) {
-                    userRepository.getUser(userId!!).subscribe(Action1 { habitRPGUser -> this.user = habitRPGUser }, RxErrorHandler.handleEmptyError())
+                    userRepository.getUser().subscribe(Consumer { habitRPGUser -> this.user = habitRPGUser }, RxErrorHandler.handleEmptyError())
                 }
             }
 
@@ -95,7 +106,7 @@ class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
         super.onViewCreated(view, savedInstanceState)
         refreshLayout.setOnRefreshListener(this)
 
-        layoutManager = recyclerView.layoutManager as LinearLayoutManager?
+        layoutManager = recyclerView.layoutManager as? LinearLayoutManager
 
         if (layoutManager == null) {
             layoutManager = LinearLayoutManager(context)
@@ -103,60 +114,128 @@ class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
         }
 
         chatAdapter = ChatRecyclerViewAdapter(null, true, user, true)
-        compositeSubscription.add(chatAdapter?.userLabelClickEvents?.subscribe(Action1 { userId -> FullProfileActivity.open(context, userId) }, RxErrorHandler.handleEmptyError()))
-        compositeSubscription.add(chatAdapter?.deleteMessageEvents?.subscribe(Action1 { this.showDeleteConfirmationDialog(it) }, RxErrorHandler.handleEmptyError()))
-        compositeSubscription.add(chatAdapter?.flagMessageEvents?.subscribe(Action1 { this.showFlagConfirmationDialog(it) }, RxErrorHandler.handleEmptyError()))
-        compositeSubscription.add(chatAdapter?.copyMessageAsTodoEvents?.subscribe(Action1{ this.copyMessageAsTodo(it) }, RxErrorHandler.handleEmptyError()))
-        compositeSubscription.add(chatAdapter?.copyMessageEvents?.subscribe(Action1 { this.copyMessageToClipboard(it) }, RxErrorHandler.handleEmptyError()))
-        compositeSubscription.add(chatAdapter?.likeMessageEvents?.flatMap<ChatMessage>( { socialRepository.likeMessage(it) })?.subscribe(Action1 { }, RxErrorHandler.handleEmptyError()))
+        chatAdapter.notNull {adapter ->
+            compositeSubscription.add(adapter.getUserLabelClickFlowable().subscribe(Consumer { userId ->
+                context.notNull { FullProfileActivity.open(it, userId) }
+            }, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(adapter.getDeleteMessageFlowable().subscribe(Consumer { this.showDeleteConfirmationDialog(it) }, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(adapter.getFlagMessageClickFlowable().subscribe(Consumer { this.showFlagConfirmationDialog(it) }, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(adapter.getReplyMessageEvents().subscribe(Consumer{ setReplyTo(it) }, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(adapter.getCopyMessageFlowable().subscribe(Consumer { this.copyMessageToClipboard(it) }, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(adapter.getLikeMessageFlowable().flatMap<ChatMessage> { socialRepository.likeMessage(it) }.subscribe(Consumer { }, RxErrorHandler.handleEmptyError()))
+        }
 
         chatBarView.sendAction = { sendChatMessage(it) }
+        chatBarView.maxChatLength = configManager.maxChatLength()
 
         recyclerView.adapter = chatAdapter
         recyclerView.itemAnimator = SafeDefaultItemAnimator()
 
-        socialRepository.getGroupChat(groupId).first().subscribe(Action1<RealmResults<ChatMessage>> { this.setChatMessages(it) }, RxErrorHandler.handleEmptyError())
+        groupId.notNull { id ->
+            socialRepository.getGroupChat(id).firstElement()
+                    .subscribe(Consumer<RealmResults<ChatMessage>> { this.setChatMessages(it) }, RxErrorHandler.handleEmptyError())
+        }
 
         if (user?.flags?.isCommunityGuidelinesAccepted == true) {
             communityGuidelinesView.visibility = View.GONE
         } else {
-            communityGuidelinesView.setOnClickListener {
+            communityGuidelinesView.setOnClickListener { _ ->
                 val i = Intent(Intent.ACTION_VIEW)
                 i.data = Uri.parse("https://habitica.com/static/community-guidelines")
                 context?.startActivity(i)
-                userRepository.updateUser(user, "flags.communityGuidelinesAccepted", true).subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+                userRepository.updateUser(user, "flags.communityGuidelinesAccepted", true).subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
             }
         }
-        onRefresh()
+
+        recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView?, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                isScrolledToTop = layoutManager?.findFirstVisibleItemPosition() == 0
+            }
+        })
+
+        refresh(false)
     }
 
+    override fun onDestroyView() {
+        super.onDestroyView()
+        stopAutoRefreshing()
+    }
+
+    override fun setUserVisibleHint(isVisibleToUser: Boolean) {
+        super.setUserVisibleHint(isVisibleToUser)
+        if (isVisibleToUser) {
+            startAutoRefreshing()
+        } else {
+            stopAutoRefreshing()
+        }
+    }
+
+    private fun startAutoRefreshing() {
+        if (refreshDisposable != null && refreshDisposable?.isDisposed != true) {
+            refreshDisposable?.dispose()
+        }
+        refreshDisposable = Observable.interval(30, TimeUnit.SECONDS)
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(Consumer {
+            refresh(false)
+        }, RxErrorHandler.handleEmptyError())
+    }
+
+    private fun stopAutoRefreshing() {
+        if (refreshDisposable?.isDisposed != true) {
+            refreshDisposable?.dispose()
+            refreshDisposable = null
+        }
+    }
+
+    private fun setReplyTo(username: String?) {
+        val previousText = chatEditText.text.toString()
+        if (previousText.contains("@$username")) {
+            return
+        }
+        chatEditText.setText("@$username $previousText", TextView.BufferType.EDITABLE)
+    }
 
     override fun onRefresh() {
-        refreshLayout.isRefreshing = true
-        socialRepository.retrieveGroupChat(groupId).subscribe(Action1 {}, RxErrorHandler.handleEmptyError(), Action0 { refreshLayout?.isRefreshing = false })
+        refresh(true)
     }
 
-    fun setNavigatedToFragment(groupId: String) {
-        seenGroupId = groupId
-        navigatedOnceToFragment = true
+    private fun refresh(isUserInitiated: Boolean) {
+         if (isUserInitiated) {
+             refreshLayout.isRefreshing = true
+         }
+        groupId.notNull {id ->
+            socialRepository.retrieveGroupChat(id)
+                    .doOnEvent { _, _ -> refreshLayout?.isRefreshing = false }.subscribe(Consumer {
+                        if (isScrolledToTop) {
+                            recyclerView.scrollToPosition(0)
+                        }
+                    }, RxErrorHandler.handleEmptyError())
+        }
+    }
 
+    fun setNavigatedToFragment() {
+        navigatedOnceToFragment = true
         markMessagesAsSeen()
     }
 
     private fun markMessagesAsSeen() {
-        if (!isTavern && seenGroupId.isNotEmpty() && gotNewMessages && navigatedOnceToFragment) {
+        if (!isTavern && groupId?.isNotEmpty() == true && gotNewMessages && navigatedOnceToFragment) {
             gotNewMessages = false
-            socialRepository.markMessagesSeen(seenGroupId)
+            groupId.notNull {id ->
+                socialRepository.markMessagesSeen(id)
+            }
         }
     }
 
     private fun copyMessageToClipboard(chatMessage: ChatMessage) {
-        val clipMan = activity!!.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clipMan = activity?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         val messageText = ClipData.newPlainText("Chat message", chatMessage.text)
-        clipMan.primaryClip = messageText
-        val activity = activity as MainActivity?
+        clipMan?.primaryClip = messageText
+        val activity = activity as? MainActivity
         if (activity != null) {
-            showSnackbar(activity.getFloatingMenuWrapper(), getString(R.string.chat_message_copied), SnackbarDisplayType.NORMAL)
+            showSnackbar(activity.floatingMenuWrapper, getString(R.string.chat_message_copied), SnackbarDisplayType.NORMAL)
         }
     }
 
@@ -167,9 +246,11 @@ class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
             builder.setMessage(R.string.chat_flag_confirmation)
                     .setPositiveButton(R.string.flag_confirm) { _, _ ->
                         socialRepository.flagMessage(chatMessage)
-                                .subscribe(Action1 {
-                                    val activity = activity as MainActivity?
-                                    showSnackbar(activity!!.getFloatingMenuWrapper(), "Flagged message by " + chatMessage.user, SnackbarDisplayType.NORMAL)
+                                .subscribe(Consumer {
+                                    val activity = activity as? MainActivity
+                                    activity?.floatingMenuWrapper.notNull {
+                                        showSnackbar(it, "Flagged message by " + chatMessage.user, SnackbarDisplayType.NORMAL)
+                                    }
                                 }, RxErrorHandler.handleEmptyError())
                     }
                     .setNegativeButton(R.string.action_cancel) { _, _ -> }
@@ -184,18 +265,8 @@ class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
                     .setTitle(R.string.confirm_delete_tag_title)
                     .setMessage(R.string.confirm_delete_tag_message)
                     .setIcon(android.R.drawable.ic_dialog_alert)
-                    .setPositiveButton(android.R.string.yes) { _, _ -> socialRepository.deleteMessage(chatMessage).subscribe(Action1 { }, RxErrorHandler.handleEmptyError()) }
+                    .setPositiveButton(android.R.string.yes) { _, _ -> socialRepository.deleteMessage(chatMessage).subscribe(Consumer { }, RxErrorHandler.handleEmptyError()) }
                     .setNegativeButton(android.R.string.no, null).show()
-        }
-    }
-
-    private fun copyMessageAsTodo(chatMessage: ChatMessage) {
-        val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText(context?.getString(R.string.chat_message), chatMessage.text)
-        clipboard.primaryClip = clip
-        val activity = activity as MainActivity?
-        if (activity != null) {
-            HabiticaSnackbar.showSnackbar(activity.getFloatingMenuWrapper(), getString(R.string.chat_message_copied), HabiticaSnackbar.SnackbarDisplayType.NORMAL)
         }
     }
 
@@ -216,8 +287,12 @@ class ChatListFragment : BaseFragment(), SwipeRefreshLayout.OnRefreshListener {
     }
 
     private fun sendChatMessage(chatText: String) {
-        socialRepository.postGroupChat(groupId, chatText).subscribe(Action1 {
-            recyclerView?.scrollToPosition(0)
-        }, RxErrorHandler.handleEmptyError())
+        groupId.notNull {id ->
+            socialRepository.postGroupChat(id, chatText).subscribe(Consumer {
+                recyclerView?.scrollToPosition(0)
+            }, RxErrorHandler.handleEmptyError())
+        }
     }
+
+
 }

@@ -11,18 +11,17 @@ import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.data.UserRepository
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.user.User
-import com.habitrpg.android.habitica.ui.views.stats.StatsSliderView
+import io.reactivex.disposables.Disposable
+import io.reactivex.functions.Consumer
 import kotlinx.android.synthetic.main.dialog_bulk_allocate.*
-import rx.Subscription
-import rx.functions.Action1
 import javax.inject.Inject
 
-class BulkAllocateStatsDialog(context: Context, component: AppComponent) : AlertDialog(context) {
+class BulkAllocateStatsDialog(context: Context, component: AppComponent?) : AlertDialog(context) {
 
     @Inject
     lateinit var userRepository: UserRepository
 
-    var subscription: Subscription? = null
+    var subscription: Disposable? = null
 
     private var allocatedPoints: Int
         get() {
@@ -58,7 +57,7 @@ class BulkAllocateStatsDialog(context: Context, component: AppComponent) : Alert
     }
 
     init {
-        component.inject(this)
+        component?.inject(this)
 
         val inflater = LayoutInflater.from(context)
         val view = inflater.inflate(R.layout.dialog_bulk_allocate, null)
@@ -73,6 +72,7 @@ class BulkAllocateStatsDialog(context: Context, component: AppComponent) : Alert
     }
 
     private fun saveChanges() {
+        @Suppress("DEPRECATION")
         val progressDialog = ProgressDialog.show(context, context.getString(R.string.allocating_points), null, true)
         userRepository.bulkAllocatePoints(user, strengthSliderView.currentValue, intelligenceSliderView.currentValue, constitutionSliderView.currentValue, perceptionSliderView.currentValue)
                 .subscribe({
@@ -87,7 +87,7 @@ class BulkAllocateStatsDialog(context: Context, component: AppComponent) : Alert
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        subscription = userRepository.getUser().subscribe(Action1 {
+        subscription = userRepository.getUser().subscribe(Consumer {
             user = it
         }, RxErrorHandler.handleEmptyError())
 
@@ -132,21 +132,15 @@ class BulkAllocateStatsDialog(context: Context, component: AppComponent) : Alert
     }
 
     private fun getSliderWithHigherValue(firstSlider: StatsSliderView?, secondSlider: StatsSliderView?): StatsSliderView? {
-        if (firstSlider == null) {
-            return secondSlider
-        }
-        if (secondSlider == null) {
-            return firstSlider
-        }
-        if (firstSlider.currentValue > secondSlider.currentValue) {
-            return firstSlider
+        return if (firstSlider?.currentValue ?: 0 > secondSlider?.currentValue ?: 0) {
+            firstSlider
         } else {
-            return secondSlider
+            secondSlider
         }
     }
 
     override fun dismiss() {
-        subscription?.unsubscribe()
+        subscription?.dispose()
         super.dismiss()
     }
 

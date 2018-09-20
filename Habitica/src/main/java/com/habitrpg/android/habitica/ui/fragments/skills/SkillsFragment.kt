@@ -14,6 +14,7 @@ import android.view.ViewGroup
 import com.habitrpg.android.habitica.R
 import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.events.commands.UseSkillCommand
+import com.habitrpg.android.habitica.extensions.notNull
 import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.Skill
 import com.habitrpg.android.habitica.models.responses.SkillResponse
@@ -26,10 +27,11 @@ import com.habitrpg.android.habitica.ui.helpers.SafeDefaultItemAnimator
 import com.habitrpg.android.habitica.ui.views.HabiticaIconsHelper
 import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar
 import com.habitrpg.android.habitica.ui.views.HabiticaSnackbar.Companion.showSnackbar
+import io.reactivex.Flowable
+import io.reactivex.Observable
+import io.reactivex.functions.Consumer
 import kotlinx.android.synthetic.main.fragment_skills.*
 import org.greenrobot.eventbus.Subscribe
-import rx.Observable
-import rx.functions.Action1
 
 class SkillsFragment : BaseMainFragment() {
 
@@ -38,7 +40,14 @@ class SkillsFragment : BaseMainFragment() {
 
     internal var adapter: SkillsRecyclerViewAdapter? = null
     private var selectedSkill: Skill? = null
+    @Suppress("DEPRECATION")
     private var progressDialog: ProgressDialog? = null
+
+    override var user: User? = null
+        set(value) {
+            field = value
+            checkUserLoadSkills()
+        }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         super.onCreateView(inflater, container, savedInstanceState)
@@ -70,19 +79,13 @@ class SkillsFragment : BaseMainFragment() {
             return
         }
 
-        adapter?.mana = this.user?.stats?.getMp()
+        adapter?.mana = this.user?.stats?.mp ?: 0.toDouble()
 
         user?.let {
-            Observable.concat<Skill>(userRepository.getSkills(it).first().flatMap( { Observable.from(it) }), userRepository.getSpecialItems(it).first().flatMap( { Observable.from(it) }))
+            Observable.concat(userRepository.getSkills(it).firstElement().toObservable().flatMap { Observable.fromIterable(it) }, userRepository.getSpecialItems(it).firstElement().toObservable().flatMap { Observable.fromIterable(it) })
                     .toList()
-                    .subscribe(Action1 { skills -> adapter?.setSkillList(skills) }, RxErrorHandler.handleEmptyError())
+                    .subscribe(Consumer { skills -> adapter?.setSkillList(skills) }, RxErrorHandler.handleEmptyError())
         }
-    }
-
-    override fun setUser(user: User?) {
-        super.setUser(user)
-
-        checkUserLoadSkills()
     }
 
     @Subscribe
@@ -106,18 +109,20 @@ class SkillsFragment : BaseMainFragment() {
 
     private fun displaySkillResult(usedSkill: Skill?, response: SkillResponse) {
         removeProgressDialog()
-        adapter?.setMana(response.user.stats.mp)
+        adapter?.mana = response.user.stats?.mp ?: 0.0
         val activity = activity ?: return
         if ("special" == usedSkill?.habitClass) {
-            showSnackbar(activity.getFloatingMenuWrapper(), context!!.getString(R.string.used_skill_without_mana, usedSkill.text), HabiticaSnackbar.SnackbarDisplayType.BLUE)
+            showSnackbar(activity.floatingMenuWrapper, context?.getString(R.string.used_skill_without_mana, usedSkill.text), HabiticaSnackbar.SnackbarDisplayType.BLUE)
         } else {
-            showSnackbar(activity.getFloatingMenuWrapper(), null,
-                    context?.getString(R.string.used_skill_without_mana, usedSkill?.text),
-                    BitmapDrawable(resources, HabiticaIconsHelper.imageOfMagic()),
-                    ContextCompat.getColor(context!!, R.color.blue_10), "-" + usedSkill?.mana,
-                    HabiticaSnackbar.SnackbarDisplayType.BLUE)
+            context.notNull {
+                showSnackbar(activity.floatingMenuWrapper, null,
+                        context?.getString(R.string.used_skill_without_mana, usedSkill?.text),
+                        BitmapDrawable(resources, HabiticaIconsHelper.imageOfMagic()),
+                        ContextCompat.getColor(it, R.color.blue_10), "-" + usedSkill?.mana,
+                        HabiticaSnackbar.SnackbarDisplayType.BLUE)
+            }
         }
-        userRepository.retrieveUser(false).subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+        userRepository.retrieveUser(false).subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
     }
 
 
@@ -128,7 +133,7 @@ class SkillsFragment : BaseMainFragment() {
             when (requestCode) {
                 TASK_SELECTION_ACTIVITY -> {
                     if (resultCode == Activity.RESULT_OK) {
-                        useSkill(selectedSkill, data.getStringExtra("task_id"))
+                        useSkill(selectedSkill, data.getStringExtra("taskID"))
                     }
                 }
                 MEMBER_SELECTION_ACTIVITY -> {
@@ -145,16 +150,17 @@ class SkillsFragment : BaseMainFragment() {
             return
         }
         displayProgressDialog()
-        val observable: Observable<SkillResponse> = if (taskId != null) {
+        val observable: Flowable<SkillResponse> = if (taskId != null) {
             userRepository.useSkill(user, skill.key, skill.target, taskId)
         } else {
             userRepository.useSkill(user, skill.key, skill.target)
         }
-        observable.subscribe({ skillResponse -> this.displaySkillResult(skill, skillResponse) }) { throwable -> removeProgressDialog() }
+        observable.subscribe({ skillResponse -> this.displaySkillResult(skill, skillResponse) }) { removeProgressDialog() }
     }
 
     private fun displayProgressDialog() {
         progressDialog?.dismiss()
+        @Suppress("DEPRECATION")
         progressDialog = ProgressDialog.show(activity, context?.getString(R.string.skill_progress_title), null, true)
     }
 

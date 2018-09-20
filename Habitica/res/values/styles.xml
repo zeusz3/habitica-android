@@ -217,11 +217,19 @@
 
     <style name="Pill">
         <item name="android:textSize">11sp</item>
-        <item name="android:background">@drawable/pill_bg</item>
+        <item name="android:background">@drawable/pill_bg_gray</item>
         <item name="android:paddingRight">@dimen/pill_horizontal_padding</item>
         <item name="android:paddingLeft">@dimen/pill_horizontal_padding</item>
         <item name="android:paddingTop">@dimen/pill_vertical_padding</item>
         <item name="android:paddingBottom">@dimen/pill_vertical_padding</item>
+    </style>
+
+    <style name="Pill.White">
+        <item name="android:background">@drawable/pill_bg_white</item>
+    </style>
+    <style name="Pill.Purple">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:background">@drawable/pill_bg_purple_300</item>
     </style>
 
     <style name="Pill.Selected">

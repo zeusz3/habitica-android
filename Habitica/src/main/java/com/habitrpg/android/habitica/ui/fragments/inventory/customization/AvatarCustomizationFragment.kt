@@ -17,11 +17,10 @@ import com.habitrpg.android.habitica.ui.adapter.CustomizationRecyclerViewAdapter
 import com.habitrpg.android.habitica.ui.fragments.BaseMainFragment
 import com.habitrpg.android.habitica.ui.helpers.MarginDecoration
 import com.habitrpg.android.habitica.ui.helpers.SafeDefaultItemAnimator
+import io.reactivex.Flowable
+import io.reactivex.functions.Consumer
 import io.realm.RealmResults
 import kotlinx.android.synthetic.main.fragment_recyclerview.*
-import rx.Observable
-import rx.functions.Action1
-import java.util.*
 import javax.inject.Inject
 
 class AvatarCustomizationFragment : BaseMainFragment() {
@@ -49,27 +48,27 @@ class AvatarCustomizationFragment : BaseMainFragment() {
                     }
                     userRepository.updateUser(user, updatePath, customization.identifier)
                 }
-                .subscribe(Action1 { }, RxErrorHandler.handleEmptyError()))
+                .subscribe(Consumer { }, RxErrorHandler.handleEmptyError()))
         compositeSubscription.add(adapter.getUnlockCustomizationEvents()
                 .flatMap<UnlockResponse> { customization ->
                     val user = this.user
-                    return@flatMap if (user != null) {
+                    if (user != null) {
                     userRepository.unlockPath(user, customization)
                     } else {
-                        Observable.just(null)
+                        Flowable.empty()
                     }
                 }
-                .subscribe(Action1 { }, RxErrorHandler.handleEmptyError()))
+                .subscribe(Consumer { }, RxErrorHandler.handleEmptyError()))
         compositeSubscription.add(adapter.getUnlockSetEvents()
                 .flatMap<UnlockResponse> { set ->
                     val user = this.user
-                    return@flatMap if (user != null) {
+                    if (user != null) {
                         userRepository.unlockPath(user, set)
                     } else {
-                        Observable.just(null)
+                        Flowable.empty()
                     }
                  }
-                .subscribe(Action1 { }, RxErrorHandler.handleEmptyError()))
+                .subscribe(Consumer { }, RxErrorHandler.handleEmptyError()))
 
 
         return view
@@ -80,7 +79,7 @@ class AvatarCustomizationFragment : BaseMainFragment() {
 
         setGridSpanCount(view.width)
         if (recyclerView.layoutManager == null) {
-            recyclerView.layoutManager = GridLayoutManager(activity, 2)
+            layoutManager = GridLayoutManager(activity, 2)
             layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
                 override fun getSpanSize(position: Int): Int {
                     return if (adapter.getItemViewType(position) == 0) {
@@ -90,6 +89,7 @@ class AvatarCustomizationFragment : BaseMainFragment() {
                     }
                 }
             }
+            recyclerView.layoutManager = layoutManager
         }
         recyclerView.addItemDecoration(MarginDecoration(context))
 
@@ -115,14 +115,11 @@ class AvatarCustomizationFragment : BaseMainFragment() {
     }
 
     private fun loadCustomizations() {
-        if (user == null) {
-            return
-        }
-        compositeSubscription.add(customizationRepository.getCustomizations(type, category, true).subscribe(Action1<RealmResults<Customization>> { adapter.setCustomizations(it) }, RxErrorHandler.handleEmptyError()))
+        val type = this.type ?: return
+        compositeSubscription.add(customizationRepository.getCustomizations(type, category, true).subscribe(Consumer<RealmResults<Customization>> { adapter.setCustomizations(it) }, RxErrorHandler.handleEmptyError()))
         if (type == "hair" && (category == "beard" || category == "mustache")) {
             val otherCategory = if (category == "mustache") "beard" else "mustache"
-            compositeSubscription.add(customizationRepository.getCustomizations(type, otherCategory, true).subscribe(Action1<RealmResults<Customization>> { adapter.additionalSetItems = it }, RxErrorHandler.handleEmptyError()))
-
+            compositeSubscription.add(customizationRepository.getCustomizations(type, otherCategory, true).subscribe(Consumer<RealmResults<Customization>> { adapter.additionalSetItems = it }, RxErrorHandler.handleEmptyError()))
         }
     }
 
@@ -142,13 +139,13 @@ class AvatarCustomizationFragment : BaseMainFragment() {
         layoutManager.spanCount = spanCount
     }
 
-    override fun updateUserData(user: User) {
+    override fun updateUserData(user: User?) {
         super.updateUserData(user)
-        this.adapter.gemBalance = (user.balance * 4).toInt()
+        this.adapter.gemBalance = user?.gemCount ?: 0
         this.updateActiveCustomization()
         if (adapter.customizationList.size != 0) {
             val ownedCustomizations = ArrayList<String>()
-            user.purchased?.customizations?.filter { it.type == this.type }?.mapTo(ownedCustomizations) { it.id }
+            user?.purchased?.customizations?.filter { it.type == this.type }?.mapTo(ownedCustomizations) { it.id }
             adapter.updateOwnership(ownedCustomizations)
         } else {
             this.loadCustomizations()
@@ -156,7 +153,7 @@ class AvatarCustomizationFragment : BaseMainFragment() {
     }
 
     private fun updateActiveCustomization() {
-        if (this.type == null || this.user == null || this.user!!.preferences == null) {
+        if (this.type == null || user?.preferences == null) {
             return
         }
         val prefs = this.user?.preferences

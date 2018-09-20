@@ -22,12 +22,13 @@ import net.pherth.android.emoji_library.EmojiHandler;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import javax.inject.Inject;
 import javax.inject.Named;
 
-import rx.Observable;
-import rx.android.schedulers.AndroidSchedulers;
+import io.reactivex.Observable;
+import io.reactivex.android.schedulers.AndroidSchedulers;
 
 public abstract class TaskListFactory implements RemoteViewsService.RemoteViewsFactory {
     private final int widgetId;
@@ -54,7 +55,7 @@ public abstract class TaskListFactory implements RemoteViewsService.RemoteViewsF
         this.taskType = taskType;
 
         if (userID == null) {
-            HabiticaApplication.getComponent().inject(this);
+            Objects.requireNonNull(HabiticaApplication.Companion.getComponent()).inject(this);
         }
         this.loadData();
     }
@@ -62,18 +63,19 @@ public abstract class TaskListFactory implements RemoteViewsService.RemoteViewsF
     private void loadData() {
         Handler mainHandler = new Handler(context.getMainLooper());
         mainHandler.post(() -> taskRepository.getTasks(taskType, userID)
-                .first()
-                .flatMap(Observable::from)
+                .firstElement()
+                .toObservable()
+                .flatMap(Observable::fromIterable)
                 .filter(task -> (task.getType().equals(Task.TYPE_TODO) && !task.getCompleted()) || task.isDisplayedActive())
                 .toList()
-                .flatMap(tasks -> taskRepository.getTaskCopies(tasks))
+                .flatMapMaybe(tasks -> taskRepository.getTaskCopies(tasks).firstElement())
                 .subscribeOn(AndroidSchedulers.mainThread())
                 .observeOn(AndroidSchedulers.mainThread())
-                .first()
                 .subscribe(tasks -> {
+                    reloadData = false;
                     taskList = tasks;
                     AppWidgetManager.getInstance(context).notifyAppWidgetViewDataChanged(widgetId, R.id.list_view);
-                }, RxErrorHandler.handleEmptyError(), () -> reloadData = false));
+                }, RxErrorHandler.handleEmptyError()));
 
     }
 
@@ -106,7 +108,7 @@ public abstract class TaskListFactory implements RemoteViewsService.RemoteViewsF
         if (taskList.size() > position) {
             Task task = taskList.get(position);
 
-            CharSequence parsedText = MarkdownParser.parseMarkdown(task.getText());
+            CharSequence parsedText = MarkdownParser.INSTANCE.parseMarkdown(task.getText());
 
             SpannableStringBuilder builder = new SpannableStringBuilder(parsedText);
             EmojiHandler.addEmojis(this.context, builder, 16, DynamicDrawableSpan.ALIGN_BASELINE, 16, 0, -1, false);

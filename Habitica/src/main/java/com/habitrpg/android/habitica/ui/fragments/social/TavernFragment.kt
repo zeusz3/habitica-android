@@ -9,11 +9,9 @@ import android.view.ViewGroup
 import com.habitrpg.android.habitica.R
 import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.data.SocialRepository
-import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.social.Group
 import com.habitrpg.android.habitica.ui.fragments.BaseMainFragment
 import kotlinx.android.synthetic.main.fragment_viewpager.*
-import rx.functions.Action1
 import javax.inject.Inject
 
 class TavernFragment : BaseMainFragment() {
@@ -87,12 +85,12 @@ class TavernFragment : BaseMainFragment() {
             }
 
             override fun getPageTitle(position: Int): CharSequence? {
-                when (position) {
-                    0 -> return context?.getString(R.string.inn)
-                    1 -> return context?.getString(R.string.chat)
-                    2 -> return context?.getString(R.string.world_quest)
+                return when (position) {
+                    0 -> context?.getString(R.string.inn)
+                    1 -> context?.getString(R.string.chat)
+                    2 -> context?.getString(R.string.world_quest)
+                    else -> ""
                 }
-                return ""
             }
         }
         tabLayout?.setupWithViewPager(viewPager)

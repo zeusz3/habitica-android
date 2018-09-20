@@ -24,17 +24,14 @@ import com.habitrpg.android.habitica.models.tasks.Task
 import com.habitrpg.android.habitica.models.user.User
 import com.habitrpg.android.habitica.modules.AppModule
 import com.habitrpg.android.habitica.ui.activities.MainActivity
-import com.habitrpg.android.habitica.ui.adapter.tasks.DailiesRecyclerViewHolder
-import com.habitrpg.android.habitica.ui.adapter.tasks.HabitsRecyclerViewAdapter
-import com.habitrpg.android.habitica.ui.adapter.tasks.RewardsRecyclerViewAdapter
-import com.habitrpg.android.habitica.ui.adapter.tasks.TaskRecyclerViewAdapter
-import com.habitrpg.android.habitica.ui.adapter.tasks.TodosRecyclerViewAdapter
+import com.habitrpg.android.habitica.ui.adapter.tasks.*
 import com.habitrpg.android.habitica.ui.fragments.BaseFragment
 import com.habitrpg.android.habitica.ui.helpers.SafeDefaultItemAnimator
+import com.habitrpg.android.habitica.ui.viewHolders.tasks.BaseTaskViewHolder
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.functions.Consumer
 import kotlinx.android.synthetic.main.fragment_refresh_recyclerview.*
 import org.greenrobot.eventbus.EventBus
-import rx.android.schedulers.AndroidSchedulers
-import rx.functions.Action1
 import java.util.*
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -71,11 +68,7 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
                 HabitsRecyclerViewAdapter(null, true, R.layout.habit_item_card, taskFilterHelper)
             }
             Task.TYPE_DAILY -> {
-                var dailyResetOffset = 0
-                if (user != null) {
-                    dailyResetOffset = user?.preferences?.dayStart ?: 0
-                }
-                DailiesRecyclerViewHolder(null, true, R.layout.daily_item_card, dailyResetOffset, taskFilterHelper)
+                DailiesRecyclerViewHolder(null, true, R.layout.daily_item_card, taskFilterHelper)
             }
             Task.TYPE_TODO -> {
                 TodosRecyclerViewAdapter(null, true, R.layout.todo_item_card, taskFilterHelper)
@@ -90,11 +83,15 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
             allowReordering()
         }
 
-        recyclerAdapter = adapter as TaskRecyclerViewAdapter
+        recyclerAdapter = adapter as? TaskRecyclerViewAdapter
         recyclerView.adapter = adapter
 
+        recyclerAdapter?.errorButtonEvents?.subscribe(Consumer {
+            taskRepository.syncErroredTasks().subscribe(Consumer {}, RxErrorHandler.handleEmptyError())
+        }, RxErrorHandler.handleEmptyError())
+
         if (this.classType != null) {
-            taskRepository.getTasks(this.classType ?: "", userID).first().subscribe(Action1 { this.recyclerAdapter?.updateUnfilteredData(it)
+            taskRepository.getTasks(this.classType ?: "", userID).firstElement().subscribe(Consumer { this.recyclerAdapter?.updateUnfilteredData(it)
                 this.recyclerAdapter?.filter()
             }, RxErrorHandler.handleEmptyError())
         }
@@ -118,6 +115,7 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
 
         mItemTouchCallback = object : ItemTouchHelper.Callback() {
             private var fromPosition: Int? = null
+            private var movingTaskID: String? = null
 
             override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
                 super.onSelectedChanged(viewHolder, actionState)
@@ -125,6 +123,9 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
                     viewHolder.itemView.setBackgroundColor(Color.LTGRAY)
                     if (fromPosition == null) {
                         fromPosition = viewHolder.adapterPosition
+                    }
+                    if (movingTaskID == null && (viewHolder as? BaseTaskViewHolder)?.task?.isValid == true) {
+                        movingTaskID = (viewHolder as? BaseTaskViewHolder)?.task?.id
                     }
                 }
                 refreshLayout.isEnabled = false
@@ -153,15 +154,17 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
                 refreshLayout?.isEnabled = true
 
                 val fromPosition = fromPosition
-                if (fromPosition != null) {
+                val movingTaskID = movingTaskID
+                if (fromPosition != null && movingTaskID != null) {
                     recyclerAdapter?.ignoreUpdates = true
-                    taskRepository.updateTaskPosition(classType ?: "", fromPosition, viewHolder.adapterPosition)
+                    taskRepository.updateTaskPosition(classType ?: "", movingTaskID, viewHolder.adapterPosition)
                             .delay(1, TimeUnit.SECONDS)
                             .observeOn(AndroidSchedulers.mainThread())
-                            .subscribe(Action1 { recyclerAdapter?.ignoreUpdates = false
+                            .subscribe(Consumer { recyclerAdapter?.ignoreUpdates = false
                             recyclerAdapter?.notifyDataSetChanged()}, RxErrorHandler.handleEmptyError())
-                    this.fromPosition = null
                 }
+                this.fromPosition = null
+                this.movingTaskID = null
             }
         }
         if (savedInstanceState != null) {
@@ -185,7 +188,7 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        recyclerView.adapter = recyclerAdapter as RecyclerView.Adapter<*>?
+        recyclerView.adapter = recyclerAdapter as? RecyclerView.Adapter<*>
         recyclerAdapter?.filter()
 
         layoutManager = recyclerView.layoutManager
@@ -236,7 +239,7 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
 
         if (Task.TYPE_REWARD == className) {
             compositeSubscription.add(taskRepository.getTasks(this.className, userID)
-                    .subscribe(Action1 { recyclerAdapter?.updateData(it) }, RxErrorHandler.handleEmptyError()))
+                    .subscribe(Consumer { recyclerAdapter?.updateData(it) }, RxErrorHandler.handleEmptyError()))
         }
     }
 
@@ -260,22 +263,20 @@ open class TaskRecyclerViewFragment : BaseFragment(), View.OnClickListener, Swip
         userRepository.retrieveUser(true, true)
                 .doOnTerminate {
                     refreshLayout?.isRefreshing = false
-                }.subscribe(Action1 { }, RxErrorHandler.handleEmptyError())
+                }.subscribe(Consumer { }, RxErrorHandler.handleEmptyError())
     }
 
     fun setActiveFilter(activeFilter: String) {
-        if (classType != null) {
-            taskFilterHelper.setActiveFilter(classType, activeFilter)
-        }
+        taskFilterHelper.setActiveFilter(classType ?: "", activeFilter)
         recyclerAdapter?.filter()
 
         if (activeFilter == Task.FILTER_COMPLETED) {
-            compositeSubscription.add(taskRepository.retrieveCompletedTodos(userID).subscribe(Action1 {}, RxErrorHandler.handleEmptyError()))
+            compositeSubscription.add(taskRepository.retrieveCompletedTodos(userID).subscribe(Consumer {}, RxErrorHandler.handleEmptyError()))
         }
     }
 
     companion object {
-        private val CLASS_TYPE_KEY = "CLASS_TYPE_KEY"
+        private const val CLASS_TYPE_KEY = "CLASS_TYPE_KEY"
 
         fun newInstance(context: Context?, user: User?, classType: String): TaskRecyclerViewFragment {
             val fragment = TaskRecyclerViewFragment()

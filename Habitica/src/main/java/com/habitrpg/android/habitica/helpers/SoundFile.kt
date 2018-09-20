@@ -13,16 +13,13 @@ class SoundFile(val theme: String, private val fileName: String) : MediaPlayer.O
     private var isPlaying: Boolean = false
 
     val webUrl: String
-        get() = "https://habitica.com/assets/audio/$theme/$fileName.mp3"
+        get() = "https://s3.amazonaws.com/habitica-assets/mobileApp/sounds/$theme/$fileName.mp3"
 
     val filePath: String
         get() = theme + "_" + fileName + ".mp3"
 
-    init {
-    }
-
     fun play() {
-        if (isPlaying) {
+        if (isPlaying || file?.path == null) {
             return
         }
 
@@ -42,6 +39,7 @@ class SoundFile(val theme: String, private val fileName: String) : MediaPlayer.O
                         .build()
                 m.setAudioAttributes(attributes)
             } else {
+                @Suppress("Deprecation")
                 m.setAudioStreamType(AudioManager.STREAM_NOTIFICATION)
             }
             m.prepare()

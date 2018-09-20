@@ -6,7 +6,6 @@ import android.support.v7.widget.RecyclerView
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-
 import com.habitrpg.android.habitica.R
 import com.habitrpg.android.habitica.components.AppComponent
 import com.habitrpg.android.habitica.data.InventoryRepository
@@ -15,24 +14,24 @@ import com.habitrpg.android.habitica.helpers.RxErrorHandler
 import com.habitrpg.android.habitica.models.inventory.Mount
 import com.habitrpg.android.habitica.models.inventory.Pet
 import com.habitrpg.android.habitica.models.user.Items
-import com.habitrpg.android.habitica.models.user.User
 import com.habitrpg.android.habitica.ui.adapter.inventory.PetDetailRecyclerAdapter
 import com.habitrpg.android.habitica.ui.fragments.BaseMainFragment
 import com.habitrpg.android.habitica.ui.fragments.inventory.items.ItemRecyclerFragment
 import com.habitrpg.android.habitica.ui.helpers.MarginDecoration
 import com.habitrpg.android.habitica.ui.helpers.SafeDefaultItemAnimator
+import com.habitrpg.android.habitica.ui.helpers.bindView
+import com.habitrpg.android.habitica.ui.helpers.resetViews
+import io.reactivex.functions.Consumer
 import io.realm.RealmResults
-import kotlinx.android.synthetic.main.fragment_recyclerview.*
-
 import org.greenrobot.eventbus.Subscribe
-import rx.functions.Action1
-
 import javax.inject.Inject
 
 class PetDetailRecyclerFragment : BaseMainFragment() {
 
     @Inject
     lateinit var inventoryRepository: InventoryRepository
+
+    private val recyclerView: RecyclerView by bindView(R.id.recyclerView)
 
     var adapter: PetDetailRecyclerAdapter = PetDetailRecyclerAdapter(null, true)
     var animalType: String = ""
@@ -62,6 +61,8 @@ class PetDetailRecyclerFragment : BaseMainFragment() {
         super.onViewCreated(view, savedInstanceState)
         val finalView = view
 
+        resetViews()
+
         layoutManager = GridLayoutManager(getActivity(), 2)
         recyclerView.layoutManager = layoutManager
         recyclerView.addItemDecoration(MarginDecoration(getActivity()))
@@ -72,9 +73,9 @@ class PetDetailRecyclerFragment : BaseMainFragment() {
         recyclerView.itemAnimator = SafeDefaultItemAnimator()
         this.loadItems()
 
-        compositeSubscription.add(adapter.equipEvents
+        compositeSubscription.add(adapter.getEquipFlowable()
                 .flatMap<Items> { key -> inventoryRepository.equip(user, "pet", key) }
-                .subscribe(Action1 { }, RxErrorHandler.handleEmptyError()))
+                .subscribe(Consumer { }, RxErrorHandler.handleEmptyError()))
 
         finalView.post { setGridSpanCount(finalView.width) }
     }
@@ -86,8 +87,8 @@ class PetDetailRecyclerFragment : BaseMainFragment() {
 
     private fun setGridSpanCount(width: Int) {
         var spanCount = 0
-        if (context != null && context!!.resources != null) {
-            val itemWidth: Float = context!!.resources.getDimension(R.dimen.pet_width)
+        if (context != null && context?.resources != null) {
+            val itemWidth: Float = context?.resources?.getDimension(R.dimen.pet_width) ?: 120f
 
             spanCount = (width / itemWidth).toInt()
         }
@@ -100,8 +101,8 @@ class PetDetailRecyclerFragment : BaseMainFragment() {
 
     private fun loadItems() {
         if (animalType.isNotEmpty() && animalGroup.isNotEmpty()) {
-            inventoryRepository.getPets(animalType, animalGroup).first().subscribe(Action1<RealmResults<Pet>> { adapter.updateData(it) }, RxErrorHandler.handleEmptyError())
-            inventoryRepository.getOwnedMounts(animalType, animalGroup).subscribe(Action1<RealmResults<Mount>> { adapter.setOwnedMounts(it) }, RxErrorHandler.handleEmptyError())
+            inventoryRepository.getPets(animalType, animalGroup).firstElement().subscribe(Consumer<RealmResults<Pet>> { adapter.updateData(it) }, RxErrorHandler.handleEmptyError())
+            inventoryRepository.getOwnedMounts(animalType, animalGroup).subscribe(Consumer<RealmResults<Mount>> { adapter.setOwnedMounts(it) }, RxErrorHandler.handleEmptyError())
         }
     }
 
@@ -125,6 +126,6 @@ class PetDetailRecyclerFragment : BaseMainFragment() {
     }
 
     companion object {
-        private val ANIMAL_TYPE_KEY = "ANIMAL_TYPE_KEY"
+        private const val ANIMAL_TYPE_KEY = "ANIMAL_TYPE_KEY"
     }
 }
